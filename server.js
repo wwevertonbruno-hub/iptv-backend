@@ -7,7 +7,7 @@ const app = express();
 app.use(express.json());
 
 const headers = {
-  "User-Agent": "VLC/3.0.0 LibVLC",
+  "User-Agent": "IPTVSmartersPlayer",
   "Accept": "*/*"
 };
 
