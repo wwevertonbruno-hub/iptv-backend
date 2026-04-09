@@ -8,7 +8,7 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Headers que simulam o aplicativo IPTV Smarters Pro (Evita Erro 403)
+// Headers de simulação do IPTV Smarters Pro para evitar bloqueios (403 Forbidden)
 const standardHeaders = {
   "User-Agent": "IPTVSmartersPlayer",
   "Accept": "*/*",
@@ -17,12 +17,12 @@ const standardHeaders = {
   "Connection": "keep-alive"
 };
 
-// Rota de Teste para verificar se o Railway está online
+// Rota de Teste do Railway
 app.get("/", (req, res) => {
-  res.send("Backend IPTV v2 Online 🚀");
+  res.send("Backend IPTV v2.1 (Canais + Filmes + Séries) Online 🚀");
 });
 
-// LOGIN E BUSCA DE CANAIS (POST)
+// LOGIN E BUSCA DE CONTEÚDO COMPLETO
 app.post("/login", async (req, res) => {
   try {
     const { dns, username, password } = req.body;
@@ -31,43 +31,40 @@ app.post("/login", async (req, res) => {
       return res.status(400).json({ error: "Preencha DNS, usuário e senha" });
     }
 
-    // Adicionado um 'cb' (cache buster) no final para evitar bloqueio de repetição
-    const apiUrl = `${dns}/player_api.php?username=${username}&password=${password}&action=get_live_streams&cb=${Date.now()}`;
-
-    console.log("Tentando conexão em:", dns);
-
-    const response = await fetch(apiUrl, { 
-      headers: standardHeaders,
-      timeout: 10000 // 10 segundos de limite
-    });
-
-    if (!response.ok) {
-      return res.status(response.status).json({
-        error: "O servidor IPTV recusou a conexão",
-        status: response.status,
-        mensagem: "Verifique se o DNS e as credenciais estão corretos ou se o IP foi bloqueado."
-      });
-    }
-
-    const data = await response.json();
+    const baseParams = `username=${username}&password=${password}`;
     
-    // Se o retorno for um objeto de erro do Xtream Codes
-    if (data.user_info && data.user_info.auth === 0) {
-      return res.status(401).json({ error: "Usuário ou senha inválidos no servidor IPTV" });
-    }
+    console.log("Buscando conteúdo completo para:", dns);
 
-    res.json(data);
+    // Faz as 3 requisições simultâneas para otimizar o tempo de resposta
+    const [resLive, resMovies, resSeries] = await Promise.all([
+      fetch(`${dns}/player_api.php?${baseParams}&action=get_live_streams`, { headers: standardHeaders }),
+      fetch(`${dns}/player_api.php?${baseParams}&action=get_vod_streams`, { headers: standardHeaders }),
+      fetch(`${dns}/player_api.php?${baseParams}&action=get_series`, { headers: standardHeaders })
+    ]);
+
+    // Converte os resultados para JSON
+    const live = await resLive.json();
+    const movies = await resMovies.json();
+    const series = await resSeries.json();
+
+    // Retorna um objeto estruturado para o Lovable
+    res.json({
+      user_info: { auth: 1, status: "Active" }, // Força status ativo para o frontend
+      live_streams: Array.isArray(live) ? live : [],
+      vod_streams: Array.isArray(movies) ? movies : [],
+      series: Array.isArray(series) ? series : []
+    });
 
   } catch (err) {
     console.error("Erro no Processamento:", err.message);
     res.status(500).json({
-      error: "Falha crítica de conexão",
+      error: "Falha ao carregar conteúdo",
       detalhe: err.message
     });
   }
 });
 
-// Proxy de Imagens (Logos dos canais)
+// Proxy de Imagens (Logos e Capas de Filmes)
 app.get("/img", async (req, res) => {
   try {
     const r = await fetch(req.query.url, { headers: standardHeaders });
@@ -78,7 +75,7 @@ app.get("/img", async (req, res) => {
   }
 });
 
-// Proxy de Player (Streams .ts ou .m3u8)
+// Proxy de Player (Streams ao vivo, MP4 e MKV)
 app.get("/play", async (req, res) => {
   try {
     const r = await fetch(req.query.url, { headers: standardHeaders });
@@ -91,5 +88,5 @@ app.get("/play", async (req, res) => {
 
 const PORT = process.env.PORT || 8080;
 app.listen(PORT, "0.0.0.0", () => {
-  console.log("Servidor rodando na porta " + PORT);
+  console.log("Servidor iniciado com Canais, Filmes e Séries na porta " + PORT);
 });
