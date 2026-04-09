@@ -1,0 +1,32 @@
+const express = require("express");
+const fetch = require("node-fetch");
+const app = express();
+
+const BASE = "http://aptxu.com";
+const USER = "EzFgZ4v3w";
+const PASS = "vyesZtxZk";
+
+const headers = {
+  "User-Agent": "VLC/3.0.0 LibVLC",
+  "Referer": BASE,
+  "Accept": "*/*"
+};
+
+app.get("/live", async (req, res) => {
+  const r = await fetch(`${BASE}/player_api.php?username=${USER}&password=${PASS}&action=get_live_streams`, { headers });
+  res.json(await r.json());
+});
+
+app.get("/img", async (req, res) => {
+  const r = await fetch(req.query.url, { headers });
+  res.set("Content-Type", r.headers.get("content-type"));
+  r.body.pipe(res);
+});
+
+app.get("/play", async (req, res) => {
+  const r = await fetch(req.query.url, { headers });
+  res.set("Content-Type", r.headers.get("content-type"));
+  r.body.pipe(res);
+});
+
+app.listen(process.env.PORT || 3000);
