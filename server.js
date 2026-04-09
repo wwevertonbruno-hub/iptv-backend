@@ -3,37 +3,45 @@ const fetch = require("node-fetch");
 
 const app = express();
 
-// 🔐 CONFIG IPTV
-const BASE = "http://aptxu.com";
-const USER = "EzFgZ4v3w";
-const PASS = "vyesZtxZk";
+// permitir JSON no body
+app.use(express.json());
 
 // 🔥 HEADERS ANTI-BLOQUEIO
-const headers = {
+const getHeaders = (base) => ({
   "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
-  "Referer": BASE,
-  "Origin": BASE,
+  "Referer": base,
+  "Origin": base,
   "Accept": "*/*",
   "Connection": "keep-alive"
-};
+});
 
 // ✅ TESTE BACKEND
 app.get("/", (req, res) => {
   res.send("Backend rodando 🚀");
 });
 
-// 📺 LISTA DE CANAIS
-app.get("/live", async (req, res) => {
+// 🔐 LOGIN DINÂMICO (XTREAM)
+app.post("/login", async (req, res) => {
   try {
-    const response = await fetch(`${BASE}/player_api.php?username=${USER}&password=${PASS}&action=get_live_streams`, {
-      headers,
-      timeout: 10000
-    });
+    const { dns, username, password } = req.body;
+
+    if (!dns || !username || !password) {
+      return res.status(400).json({
+        error: "Preencha DNS, usuário e senha"
+      });
+    }
+
+    const response = await fetch(
+      `${dns}/player_api.php?username=${username}&password=${password}&action=get_live_streams`,
+      {
+        headers: getHeaders(dns),
+        timeout: 10000
+      }
+    );
 
     if (!response.ok) {
-      return res.status(500).json({
-        error: "Erro ao buscar IPTV",
-        status: response.status
+      return res.status(response.status).json({
+        error: "Erro ao conectar no servidor IPTV"
       });
     }
 
@@ -42,16 +50,24 @@ app.get("/live", async (req, res) => {
 
   } catch (err) {
     res.status(500).json({
-      error: "Falha na conexão com IPTV",
+      error: "Falha na conexão",
       detalhe: err.message
     });
   }
 });
 
-// 🖼️ PROXY DE IMAGEM (BANNERS)
+// 🖼️ PROXY DE IMAGEM
 app.get("/img", async (req, res) => {
   try {
-    const response = await fetch(req.query.url, { headers });
+    const url = req.query.url;
+
+    if (!url) return res.status(400).send("URL não informada");
+
+    const base = new URL(url).origin;
+
+    const response = await fetch(url, {
+      headers: getHeaders(base)
+    });
 
     if (!response.ok) {
       return res.status(500).send("Erro ao carregar imagem");
@@ -65,10 +81,18 @@ app.get("/img", async (req, res) => {
   }
 });
 
-// 🎬 PROXY DE STREAM (PLAYER)
+// 🎬 PROXY DE STREAM
 app.get("/play", async (req, res) => {
   try {
-    const response = await fetch(req.query.url, { headers });
+    const url = req.query.url;
+
+    if (!url) return res.status(400).send("URL não informada");
+
+    const base = new URL(url).origin;
+
+    const response = await fetch(url, {
+      headers: getHeaders(base)
+    });
 
     if (!response.ok) {
       return res.status(500).send("Erro ao carregar stream");
@@ -82,7 +106,7 @@ app.get("/play", async (req, res) => {
   }
 });
 
-// 🚀 PORTA RAILWAY
+// 🚀 PORTA
 const PORT = process.env.PORT || 8080;
 
 app.listen(PORT, "0.0.0.0", () => {
