@@ -13,6 +13,11 @@ const headers = {
   "Accept": "*/*"
 };
 
+// ✅ rota principal (teste)
+app.get("/", (req, res) => {
+  res.send("Backend rodando 🚀");
+});
+
 // canais
 app.get("/live", async (req, res) => {
   const r = await fetch(`${BASE}/player_api.php?username=${USER}&password=${PASS}&action=get_live_streams`, { headers });
