@@ -12,7 +12,9 @@ app.use(express.json());
 
 const headers = {
   "User-Agent": "IPTVSmartersPlayer",
-  "Accept": "*/*"
+  "Accept": "*/*",
+  "Accept-Encoding": "gzip, deflate",
+  "Connection": "keep-alive"
 };
 
 // Rota de Teste
