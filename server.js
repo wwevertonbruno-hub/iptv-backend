@@ -3,62 +3,54 @@ const fetch = require("node-fetch");
 const cors = require("cors");
 
 const app = express();
-
-// Ativa o CORS para o Lovable
 app.use(cors());
 app.use(express.json());
 
-// Headers que funcionaram nos seus testes anteriores (IPTV Smarters)
+// Cabeçalhos avançados para simular um dispositivo real e evitar bloqueios
 const standardHeaders = {
   "User-Agent": "IPTVSmartersPlayer",
   "Accept": "*/*",
   "Accept-Language": "en-US,en;q=0.9",
   "X-Requested-With": "com.nst.iptvsmartersbox",
+  "Origin": "http://aptxu.com",
+  "Referer": "http://aptxu.com/",
   "Connection": "keep-alive"
 };
 
-// Teste de conexão
-app.get("/", (req, res) => {
-  res.send("Backend IPTV Restaurado (Canais + Filmes + Séries) 🚀");
-});
+app.get("/", (req, res) => res.send("Backend IPTV v4.0 (Bypass) Online 🚀"));
 
-// LOGIN E BUSCA DE CONTEÚDO (POST)
+// LOGIN E BUSCA POR AÇÃO
 app.post("/login", async (req, res) => {
   try {
-    const { dns, username, password } = req.body;
+    const { dns, username, password, action } = req.body;
+    
+    // Se não enviar action, o padrão é buscar info da conta/canais
+    const act = action || "get_live_streams"; 
+    
+    // Constrói a URL exata da API Xtream Codes
+    const url = `${dns}/player_api.php?username=${username}&password=${password}&action=${act}`;
+    
+    console.log(`[LOG] Chamando ${act} no DNS: ${dns}`);
 
-    if (!dns || !username || !password) {
-      return res.status(400).json({ error: "Preencha DNS, usuário e senha" });
+    const response = await fetch(url, { 
+        headers: standardHeaders,
+        timeout: 15000 // Aumentado para 15 segundos para listas grandes
+    });
+    
+    if (!response.ok) {
+        console.error(`[ERRO] Servidor IPTV retornou status: ${response.status}`);
+        return res.status(response.status).json({ 
+            error: "Servidor IPTV recusou", 
+            status_origem: response.status 
+        });
     }
 
-    const baseParams = `username=${username}&password=${password}`;
-    
-    // Busca simultânea das 3 listas principais
-    const [resLive, resMovies, resSeries] = await Promise.all([
-      fetch(`${dns}/player_api.php?${baseParams}&action=get_live_streams`, { headers: standardHeaders }),
-      fetch(`${dns}/player_api.php?${baseParams}&action=get_vod_streams`, { headers: standardHeaders }),
-      fetch(`${dns}/player_api.php?${baseParams}&action=get_series`, { headers: standardHeaders })
-    ]);
-
-    // Converte para JSON
-    const live = await resLive.json().catch(() => []);
-    const movies = await resMovies.json().catch(() => []);
-    const series = await resSeries.json().catch(() => []);
-
-    // Retorna a estrutura que o Lovable já reconhece
-    res.json({
-      user_info: { auth: 1, status: "Active" },
-      live_streams: Array.isArray(live) ? live : [],
-      vod_streams: Array.isArray(movies) ? movies : [],
-      series: Array.isArray(series) ? series : []
-    });
+    const data = await response.json();
+    res.json(data);
 
   } catch (err) {
-    console.error("Erro no Processamento:", err.message);
-    res.status(500).json({
-      error: "Falha ao carregar conteúdo",
-      detalhe: err.message
-    });
+    console.error(`[ERRO CRÍTICO] ${err.message}`);
+    res.status(500).json({ error: "Falha de conexão", detalhe: err.message });
   }
 });
 
@@ -68,9 +60,7 @@ app.get("/img", async (req, res) => {
     const r = await fetch(req.query.url, { headers: standardHeaders });
     res.set("Content-Type", r.headers.get("content-type"));
     r.body.pipe(res);
-  } catch {
-    res.status(500).send("Erro ao carregar imagem");
-  }
+  } catch { res.status(500).send("Erro ao processar imagem"); }
 });
 
 // Proxy de Player
@@ -79,12 +69,10 @@ app.get("/play", async (req, res) => {
     const r = await fetch(req.query.url, { headers: standardHeaders });
     res.set("Content-Type", r.headers.get("content-type"));
     r.body.pipe(res);
-  } catch {
-    res.status(500).send("Erro ao reproduzir stream");
-  }
+  } catch { res.status(500).send("Erro ao processar stream"); }
 });
 
 const PORT = process.env.PORT || 8080;
 app.listen(PORT, "0.0.0.0", () => {
-  console.log("Servidor restaurado na porta " + PORT);
+    console.log("Servidor em execução na porta " + PORT);
 });
