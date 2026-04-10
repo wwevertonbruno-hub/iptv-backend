@@ -6,7 +6,7 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Cabeçalhos avançados para simular um dispositivo real e evitar bloqueios
+// Headers de simulação de aplicativo real para evitar erro 403 e carregar metadados
 const standardHeaders = {
   "User-Agent": "IPTVSmartersPlayer",
   "Accept": "*/*",
@@ -17,44 +17,49 @@ const standardHeaders = {
   "Connection": "keep-alive"
 };
 
-app.get("/", (req, res) => res.send("Backend IPTV v4.0 (Bypass) Online 🚀"));
+app.get("/", (req, res) => res.send("Backend IPTV v5.0 (Full Info + Elenco) Online 🚀"));
 
-// LOGIN E BUSCA POR AÇÃO
+// LOGIN E BUSCA POR AÇÃO (Canais, VOD, Séries, Categorias)
 app.post("/login", async (req, res) => {
   try {
     const { dns, username, password, action } = req.body;
-    
-    // Se não enviar action, o padrão é buscar info da conta/canais
     const act = action || "get_live_streams"; 
-    
-    // Constrói a URL exata da API Xtream Codes
     const url = `${dns}/player_api.php?username=${username}&password=${password}&action=${act}`;
     
-    console.log(`[LOG] Chamando ${act} no DNS: ${dns}`);
-
-    const response = await fetch(url, { 
-        headers: standardHeaders,
-        timeout: 15000 // Aumentado para 15 segundos para listas grandes
-    });
-    
-    if (!response.ok) {
-        console.error(`[ERRO] Servidor IPTV retornou status: ${response.status}`);
-        return res.status(response.status).json({ 
-            error: "Servidor IPTV recusou", 
-            status_origem: response.status 
-        });
-    }
+    const response = await fetch(url, { headers: standardHeaders, timeout: 15000 });
+    if (!response.ok) return res.status(response.status).json({ error: "Servidor IPTV recusou" });
 
     const data = await response.json();
     res.json(data);
-
   } catch (err) {
-    console.error(`[ERRO CRÍTICO] ${err.message}`);
     res.status(500).json({ error: "Falha de conexão", detalhe: err.message });
   }
 });
 
-// Proxy de Imagens
+// NOVA ROTA: BUSCAR DETALHES DO FILME/SÉRIE (Elenco, Capas, Episódios)
+app.post("/info", async (req, res) => {
+  try {
+    const { dns, username, password, type, id } = req.body;
+    
+    // Define se busca info de VOD ou de SÉRIE
+    const actionType = type === 'series' ? 'get_series_info' : 'get_vod_info';
+    const idParam = type === 'series' ? 'series_id' : 'vod_id';
+    
+    const url = `${dns}/player_api.php?username=${username}&password=${password}&action=${actionType}&${idParam}=${id}`;
+    
+    console.log(`[INFO] Buscando detalhes do ID ${id} (${type})`);
+
+    const response = await fetch(url, { headers: standardHeaders, timeout: 10000 });
+    const data = await response.json();
+    
+    res.json(data);
+  } catch (err) {
+    console.error("[ERRO INFO]", err.message);
+    res.status(500).json({ error: "Erro ao buscar detalhes do conteúdo" });
+  }
+});
+
+// Proxy de Imagens (Essencial para fotos do elenco e posters)
 app.get("/img", async (req, res) => {
   try {
     const r = await fetch(req.query.url, { headers: standardHeaders });
@@ -74,5 +79,5 @@ app.get("/play", async (req, res) => {
 
 const PORT = process.env.PORT || 8080;
 app.listen(PORT, "0.0.0.0", () => {
-    console.log("Servidor em execução na porta " + PORT);
+    console.log("Servidor iniciado na porta " + PORT);
 });
