@@ -6,28 +6,36 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Headers de simulação de aplicativo real para evitar erro 403 e carregar metadados
+// Headers de Navegador Real para evitar detecção de Datacenter (Erro 403)
 const standardHeaders = {
-  "User-Agent": "IPTVSmartersPlayer",
-  "Accept": "*/*",
-  "Accept-Language": "en-US,en;q=0.9",
+  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36",
+  "Accept": "application/json, text/plain, */*",
+  "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
+  "Cache-Control": "no-cache",
+  "Pragma": "no-cache",
   "X-Requested-With": "com.nst.iptvsmartersbox",
-  "Origin": "http://aptxu.com",
-  "Referer": "http://aptxu.com/",
   "Connection": "keep-alive"
 };
 
-app.get("/", (req, res) => res.send("Backend IPTV v5.0 (Full Info + Elenco) Online 🚀"));
+app.get("/", (req, res) => res.send("Backend IPTV v6.0 (High Compatibility) Online 🚀"));
 
-// LOGIN E BUSCA POR AÇÃO (Canais, VOD, Séries, Categorias)
+// ROTA PRINCIPAL: LOGIN E BUSCA
 app.post("/login", async (req, res) => {
   try {
     const { dns, username, password, action } = req.body;
     const act = action || "get_live_streams"; 
-    const url = `${dns}/player_api.php?username=${username}&password=${password}&action=${act}`;
+    
+    // Adicionado Cache Buster (?cb=) para evitar respostas cacheadas de erro
+    const url = `${dns}/player_api.php?username=${username}&password=${password}&action=${act}&cb=${Date.now()}`;
     
     const response = await fetch(url, { headers: standardHeaders, timeout: 15000 });
-    if (!response.ok) return res.status(response.status).json({ error: "Servidor IPTV recusou" });
+    
+    if (!response.ok) {
+      return res.status(response.status).json({ 
+        error: "Servidor IPTV recusou", 
+        status_origem: response.status 
+      });
+    }
 
     const data = await response.json();
     res.json(data);
@@ -36,48 +44,40 @@ app.post("/login", async (req, res) => {
   }
 });
 
-// NOVA ROTA: BUSCAR DETALHES DO FILME/SÉRIE (Elenco, Capas, Episódios)
+// ROTA DE DETALHES: ELENCO, EPISÓDIOS E SINOPSE
 app.post("/info", async (req, res) => {
   try {
     const { dns, username, password, type, id } = req.body;
-    
-    // Define se busca info de VOD ou de SÉRIE
     const actionType = type === 'series' ? 'get_series_info' : 'get_vod_info';
     const idParam = type === 'series' ? 'series_id' : 'vod_id';
     
     const url = `${dns}/player_api.php?username=${username}&password=${password}&action=${actionType}&${idParam}=${id}`;
-    
-    console.log(`[INFO] Buscando detalhes do ID ${id} (${type})`);
 
     const response = await fetch(url, { headers: standardHeaders, timeout: 10000 });
     const data = await response.json();
-    
     res.json(data);
   } catch (err) {
-    console.error("[ERRO INFO]", err.message);
-    res.status(500).json({ error: "Erro ao buscar detalhes do conteúdo" });
+    res.status(500).json({ error: "Erro ao buscar detalhes" });
   }
 });
 
-// Proxy de Imagens (Essencial para fotos do elenco e posters)
+// PROXY DE IMAGENS (Posters e Fotos elenco)
 app.get("/img", async (req, res) => {
   try {
     const r = await fetch(req.query.url, { headers: standardHeaders });
     res.set("Content-Type", r.headers.get("content-type"));
     r.body.pipe(res);
-  } catch { res.status(500).send("Erro ao processar imagem"); }
+  } catch { res.status(500).send("Erro imagem"); }
 });
 
-// Proxy de Player
+// PROXY DE PLAYER
 app.get("/play", async (req, res) => {
   try {
     const r = await fetch(req.query.url, { headers: standardHeaders });
     res.set("Content-Type", r.headers.get("content-type"));
     r.body.pipe(res);
-  } catch { res.status(500).send("Erro ao processar stream"); }
+  } catch { res.status(500).send("Erro play"); }
 });
 
 const PORT = process.env.PORT || 8080;
-app.listen(PORT, "0.0.0.0", () => {
-    console.log("Servidor iniciado na porta " + PORT);
-});
+app.listen(PORT, "0.0.0.0");
