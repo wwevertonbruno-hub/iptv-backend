@@ -6,7 +6,7 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Cabeçalhos que você confirmou que funcionam (Bypass Especial)
+// Cabeçalhos de Bypass para simular dispositivo real e evitar Erro 403
 const standardHeaders = {
   "User-Agent": "IPTVSmartersPlayer",
   "Accept": "*/*",
@@ -17,15 +17,21 @@ const standardHeaders = {
   "Connection": "keep-alive"
 };
 
-app.get("/", (req, res) => res.send("Backend IPTV v4.5 (Bypass + Mobile Fix) Online 🚀"));
+app.get("/", (req, res) => res.send("Backend IPTV v4.5 (Dynamic Action) Online 🚀"));
 
-// LOGIN E BUSCA POR AÇÃO (Sua rota principal intacta)
+// ROTA DE LOGIN E CONTEÚDO DINÂMICO
 app.post("/login", async (req, res) => {
   try {
     const { dns, username, password, action } = req.body;
+    
+    // Se o app não enviar 'action', o padrão é buscar canais ao vivo
     const act = action || "get_live_streams"; 
+    
+    // Monta a URL baseada no que o app quer (Canais, Filmes, Séries ou Categorias)
     const url = `${dns}/player_api.php?username=${username}&password=${password}&action=${act}`;
     
+    console.log(`[SOLICITAÇÃO] Buscando action: ${act}`);
+
     const response = await fetch(url, { headers: standardHeaders, timeout: 15000 });
     
     if (!response.ok) {
@@ -42,12 +48,13 @@ app.post("/login", async (req, res) => {
   }
 });
 
-// INFO E ELENCO (Adicionado para metadados)
+// ROTA DE DETALHES (Elenco, Capas, Episódios)
 app.post("/info", async (req, res) => {
   try {
     const { dns, username, password, type, id } = req.body;
     const actionType = type === 'series' ? 'get_series_info' : 'get_vod_info';
     const idParam = type === 'series' ? 'series_id' : 'vod_id';
+    
     const url = `${dns}/player_api.php?username=${username}&password=${password}&action=${actionType}&${idParam}=${id}`;
     
     const response = await fetch(url, { headers: standardHeaders, timeout: 10000 });
@@ -58,7 +65,7 @@ app.post("/info", async (req, res) => {
   }
 });
 
-// Proxy de Imagens
+// PROXY DE IMAGENS
 app.get("/img", async (req, res) => {
   try {
     const r = await fetch(req.query.url, { headers: standardHeaders });
@@ -67,7 +74,7 @@ app.get("/img", async (req, res) => {
   } catch { res.status(500).send("Erro imagem"); }
 });
 
-// PROXY DE PLAYER (CORRIGIDO PARA IPHONE E ANDROID)
+// PROXY DE PLAYER (CORRIGIDO PARA PC, IPHONE E ANDROID)
 app.get("/play", async (req, res) => {
   try {
     const streamUrl = req.query.url;
@@ -92,4 +99,7 @@ app.get("/play", async (req, res) => {
 });
 
 const PORT = process.env.PORT || 8080;
-app.listen(PORT, "0.0.0.0");
+// Escuta em 0.0.0.0 para compatibilidade total com Fly.io e Railway
+app.listen(PORT, "0.0.0.0", () => {
+    console.log(`Servidor rodando na porta ${PORT}`);
+});
