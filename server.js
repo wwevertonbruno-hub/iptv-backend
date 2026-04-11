@@ -10,9 +10,8 @@ app.use(express.json());
 
 // Headers de simulação de app real para evitar erro 403
 const standardHeaders = {
-  "User-Agent": "IPTVSmartersPlayer",
+  "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1",
   "Accept": "*/*",
-  "Accept-Language": "en-US,en;q=0.9",
   "X-Requested-With": "com.nst.iptvsmartersbox",
   "Connection": "keep-alive"
 };
