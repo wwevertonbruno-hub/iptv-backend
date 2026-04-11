@@ -3,22 +3,23 @@ const fetch = require("node-fetch");
 const cors = require("cors");
 
 const app = express();
-
-// Ativa o CORS para o Lovable e navegadores mobile
 app.use(cors());
 app.use(express.json());
 
-// Headers de simulação de app real para evitar erro 403
+// Cabeçalhos que você confirmou que funcionam (Bypass Especial)
 const standardHeaders = {
-  "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1",
+  "User-Agent": "IPTVSmartersPlayer",
   "Accept": "*/*",
+  "Accept-Language": "en-US,en;q=0.9",
   "X-Requested-With": "com.nst.iptvsmartersbox",
+  "Origin": "http://aptxu.com",
+  "Referer": "http://aptxu.com/",
   "Connection": "keep-alive"
 };
 
-app.get("/", (req, res) => res.send("Backend IPTV v7.0 (Mobile Ready) Online 🚀"));
+app.get("/", (req, res) => res.send("Backend IPTV v4.5 (Bypass + Mobile Fix) Online 🚀"));
 
-// LOGIN E BUSCA POR ACTION
+// LOGIN E BUSCA POR AÇÃO (Sua rota principal intacta)
 app.post("/login", async (req, res) => {
   try {
     const { dns, username, password, action } = req.body;
@@ -26,7 +27,13 @@ app.post("/login", async (req, res) => {
     const url = `${dns}/player_api.php?username=${username}&password=${password}&action=${act}`;
     
     const response = await fetch(url, { headers: standardHeaders, timeout: 15000 });
-    if (!response.ok) return res.status(response.status).json({ error: "Servidor IPTV recusou" });
+    
+    if (!response.ok) {
+      return res.status(response.status).json({ 
+          error: "Servidor IPTV recusou", 
+          status_origem: response.status 
+      });
+    }
 
     const data = await response.json();
     res.json(data);
@@ -35,7 +42,7 @@ app.post("/login", async (req, res) => {
   }
 });
 
-// INFO DETALHADA (Elenco e Episódios)
+// INFO E ELENCO (Adicionado para metadados)
 app.post("/info", async (req, res) => {
   try {
     const { dns, username, password, type, id } = req.body;
@@ -51,7 +58,7 @@ app.post("/info", async (req, res) => {
   }
 });
 
-// PROXY DE IMAGENS
+// Proxy de Imagens
 app.get("/img", async (req, res) => {
   try {
     const r = await fetch(req.query.url, { headers: standardHeaders });
@@ -60,37 +67,27 @@ app.get("/img", async (req, res) => {
   } catch { res.status(500).send("Erro imagem"); }
 });
 
-// PROXY DE PLAYER (CORREÇÃO PARA IOS E ANDROID)
+// PROXY DE PLAYER (CORRIGIDO PARA IPHONE E ANDROID)
 app.get("/play", async (req, res) => {
   try {
     const streamUrl = req.query.url;
-    const range = req.headers.range; // O iPhone envia isso para pedir pedaços do vídeo
+    const range = req.headers.range;
 
     const fetchOptions = {
-      headers: { 
-        ...standardHeaders,
-        ...(range && { Range: range }) // Repassa o pedido de "bytes" para o IPTV
-      }
+      headers: { ...standardHeaders, ...(range && { Range: range }) }
     };
 
     const r = await fetch(streamUrl, fetchOptions);
 
-    // Headers cruciais para o Player do iOS/Android funcionar
     res.set("Content-Type", r.headers.get("content-type") || "video/mp4");
     res.set("Accept-Ranges", "bytes");
-    
-    if (r.headers.get("content-range")) {
-      res.set("Content-Range", r.headers.get("content-range"));
-    }
-    if (r.headers.get("content-length")) {
-      res.set("Content-Length", r.headers.get("content-length"));
-    }
+    if (r.headers.get("content-range")) res.set("Content-Range", r.headers.get("content-range"));
+    if (r.headers.get("content-length")) res.set("Content-Length", r.headers.get("content-length"));
 
     res.status(r.status);
     r.body.pipe(res);
-  } catch (err) {
-    console.error("Erro Player:", err.message);
-    res.status(500).send("Erro ao reproduzir stream");
+  } catch {
+    res.status(500).send("Erro ao reproduzir");
   }
 });
 
