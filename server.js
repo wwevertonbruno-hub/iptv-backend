@@ -6,7 +6,7 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Cabeçalhos de Bypass para simular dispositivo real e evitar Erro 403 (Sua configuração de sucesso)
+// Cabeçalhos de Bypass para simular dispositivo real e evitar Erro 403
 const standardHeaders = {
   "User-Agent": "IPTVSmartersPlayer",
   "Accept": "*/*",
@@ -17,26 +17,22 @@ const standardHeaders = {
   "Connection": "keep-alive"
 };
 
-app.get("/", (req, res) => res.send("Backend IPTV v4.5 (Dynamic Action + Big Lists Fix) Online 🚀"));
+app.get("/", (req, res) => res.send("Backend IPTV v4.5 (Dynamic Action) Online 🚀"));
 
 // ROTA DE LOGIN E CONTEÚDO DINÂMICO
 app.post("/login", async (req, res) => {
   try {
-    const { dns, username, password, action, category_id } = req.body;
+    const { dns, username, password, action } = req.body;
     
+    // Se o app não enviar 'action', o padrão é buscar canais ao vivo
     const act = action || "get_live_streams"; 
-    let url = `${dns}/player_api.php?username=${username}&password=${password}&action=${act}`;
     
-    // Suporte para filtro de categoria se enviado pelo app
-    if (category_id) url += `&category_id=${category_id}`;
-
+    // Monta a URL baseada no que o app quer (Canais, Filmes, Séries ou Categorias)
+    const url = `${dns}/player_api.php?username=${username}&password=${password}&action=${act}`;
+    
     console.log(`[SOLICITAÇÃO] Buscando action: ${act}`);
 
-    const response = await fetch(url, { 
-      headers: standardHeaders, 
-      timeout: 60000, // 1. AUMENTADO: 60s para listas gigantes não darem timeout
-      size: 0         // 2. ADICIONADO: Permite JSON de tamanho ilimitado (corrige filmes sumindo)
-    });
+    const response = await fetch(url, { headers: standardHeaders, timeout: 15000 });
     
     if (!response.ok) {
       return res.status(response.status).json({ 
@@ -61,7 +57,7 @@ app.post("/info", async (req, res) => {
     
     const url = `${dns}/player_api.php?username=${username}&password=${password}&action=${actionType}&${idParam}=${id}`;
     
-    const response = await fetch(url, { headers: standardHeaders, timeout: 15000 });
+    const response = await fetch(url, { headers: standardHeaders, timeout: 10000 });
     const data = await response.json();
     res.json(data);
   } catch (err) {
@@ -85,8 +81,7 @@ app.get("/play", async (req, res) => {
     const range = req.headers.range;
 
     const fetchOptions = {
-      headers: { ...standardHeaders, ...(range && { Range: range }) },
-      compress: false // 3. ADICIONADO: Essencial para não corromper o vídeo no streaming mobile
+      headers: { ...standardHeaders, ...(range && { Range: range }) }
     };
 
     const r = await fetch(streamUrl, fetchOptions);
@@ -104,6 +99,7 @@ app.get("/play", async (req, res) => {
 });
 
 const PORT = process.env.PORT || 8080;
+// Escuta em 0.0.0.0 para compatibilidade total com Fly.io e Railway
 app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Servidor Master v4.5 rodando na porta ${PORT}`);
+    console.log(`Servidor rodando na porta ${PORT}`);
 });
