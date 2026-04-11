@@ -32,7 +32,7 @@ app.post("/login", async (req, res) => {
     
     console.log(`[SOLICITAÇÃO] Buscando action: ${act}`);
 
-    const response = await fetch(url, { headers: standardHeaders, timeout: 15000 });
+    const response = await fetch(url, { headers: standardHeaders, timeout: 30000, size: 0 });
     
     if (!response.ok) {
       return res.status(response.status).json({ 
