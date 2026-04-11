@@ -6,7 +6,7 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Headers de Bypass para simular dispositivo real e evitar Erro 403
+// Cabeçalhos que você confirmou que funcionam perfeitamente (Bypass)
 const standardHeaders = {
   "User-Agent": "IPTVSmartersPlayer",
   "Accept": "*/*",
@@ -17,45 +17,44 @@ const standardHeaders = {
   "Connection": "keep-alive"
 };
 
-app.get("/", (req, res) => res.send("Backend IPTV v8.0 (Big Lists + Mobile Fix) Online 🚀"));
+app.get("/", (req, res) => res.send("Backend IPTV v4.5 (Bypass + Mobile Fix) Online 🚀"));
 
-// LOGIN E BUSCA DINÂMICA (Suporte a listas gigantes)
+// LOGIN E BUSCA POR AÇÃO (Sua rota principal intacta e funcional)
 app.post("/login", async (req, res) => {
   try {
     const { dns, username, password, action } = req.body;
     const act = action || "get_live_streams"; 
     const url = `${dns}/player_api.php?username=${username}&password=${password}&action=${act}`;
     
-    console.log(`[REQ] Buscando action: ${act}`);
+    console.log(`[LOG] Chamando ${act} no DNS: ${dns}`);
 
     const response = await fetch(url, { 
         headers: standardHeaders, 
-        timeout: 45000, // Aumentado para 45s para listas muito grandes
-        size: 0        // PERMITE JSON DE TAMANHO ILIMITADO (Essencial para busca global)
+        timeout: 30000, // Tempo aumentado para listas grandes
+        size: 0        // Sem limite de tamanho para evitar listas incompletas
     });
     
     if (!response.ok) {
-      return res.status(response.status).json({ 
-          error: "Servidor IPTV recusou", 
-          status_origem: response.status 
-      });
+        return res.status(response.status).json({ 
+            error: "Servidor IPTV recusou", 
+            status_origem: response.status 
+        });
     }
 
     const data = await response.json();
     res.json(data);
+
   } catch (err) {
-    console.error("Erro Login/Busca:", err.message);
     res.status(500).json({ error: "Falha de conexão", detalhe: err.message });
   }
 });
 
-// INFO DETALHADA PARA ELENCO E EXTENSÃO DE VÍDEO
+// INFO E ELENCO (Necessário para carregar detalhes que faltam na busca)
 app.post("/info", async (req, res) => {
   try {
     const { dns, username, password, type, id } = req.body;
     const actionType = type === 'series' ? 'get_series_info' : 'get_vod_info';
     const idParam = type === 'series' ? 'series_id' : 'vod_id';
-    
     const url = `${dns}/player_api.php?username=${username}&password=${password}&action=${actionType}&${idParam}=${id}`;
     
     const response = await fetch(url, { headers: standardHeaders, timeout: 15000 });
@@ -66,7 +65,7 @@ app.post("/info", async (req, res) => {
   }
 });
 
-// PROXY DE IMAGENS
+// Proxy de Imagens
 app.get("/img", async (req, res) => {
   try {
     const r = await fetch(req.query.url, { headers: standardHeaders });
@@ -75,20 +74,23 @@ app.get("/img", async (req, res) => {
   } catch { res.status(500).send("Erro imagem"); }
 });
 
-// PROXY DE PLAYER (CORRIGIDO: SUPORTE A RANGE E SEM COMPRESSÃO)
+// PROXY DE PLAYER (CORRIGIDO PARA IPHONE E ANDROID)
 app.get("/play", async (req, res) => {
   try {
     const streamUrl = req.query.url;
     const range = req.headers.range;
 
     const fetchOptions = {
-      headers: { ...standardHeaders, ...(range && { Range: range }) },
-      compress: false // ESSENCIAL: Impede corrupção do arquivo de vídeo no stream
+      headers: { 
+        ...standardHeaders, 
+        ...(range && { Range: range }) 
+      },
+      compress: false // Evita corrupção de dados no streaming de vídeo
     };
 
     const r = await fetch(streamUrl, fetchOptions);
 
-    // Headers cruciais para o Player do iPhone/Android/Windows conseguir navegar no vídeo
+    // Headers obrigatórios para o Player Mobile (iOS/Android) permitir navegação no vídeo
     res.set("Content-Type", r.headers.get("content-type") || "video/mp4");
     res.set("Accept-Ranges", "bytes");
     
@@ -97,13 +99,10 @@ app.get("/play", async (req, res) => {
 
     res.status(r.status);
     r.body.pipe(res);
-  } catch (err) {
-    console.error("Erro Stream Player:", err.message);
-    res.status(500).send("Erro ao reproduzir");
+  } catch {
+    res.status(500).send("Erro ao reproduzir stream");
   }
 });
 
 const PORT = process.env.PORT || 8080;
-app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Servidor Master v8.0 rodando na porta ${PORT}`);
-});
+app.listen(PORT, "0.0.0.0");
