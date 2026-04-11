@@ -6,7 +6,7 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Cabeçalhos de Bypass para simular dispositivo real e evitar Erro 403
+// Headers de Bypass para simular dispositivo real e evitar Erro 403
 const standardHeaders = {
   "User-Agent": "IPTVSmartersPlayer",
   "Accept": "*/*",
@@ -17,23 +17,22 @@ const standardHeaders = {
   "Connection": "keep-alive"
 };
 
-app.get("/", (req, res) => res.send("Backend IPTV v4.5 (Dynamic Action) Online 🚀"));
+app.get("/", (req, res) => res.send("Backend IPTV v8.0 (Big Lists + Mobile Fix) Online 🚀"));
 
-// ROTA DE LOGIN E CONTEÚDO DINÂMICO
+// LOGIN E BUSCA DINÂMICA (Suporte a listas gigantes)
 app.post("/login", async (req, res) => {
   try {
     const { dns, username, password, action } = req.body;
-    
-    // Se o app não enviar 'action', o padrão é buscar canais ao vivo
     const act = action || "get_live_streams"; 
-    
-    // Monta a URL baseada no que o app quer (Canais, Filmes, Séries ou Categorias)
     const url = `${dns}/player_api.php?username=${username}&password=${password}&action=${act}`;
     
-    console.log(`[SOLICITAÇÃO] Buscando action: ${act}`);
+    console.log(`[REQ] Buscando action: ${act}`);
 
-    const response = await fetch(url, { headers: standardHeaders, timeout: 30000, size: 0 });
-    
+    const response = await fetch(url, { 
+        headers: standardHeaders, 
+        timeout: 45000, // Aumentado para 45s para listas muito grandes
+        size: 0        // PERMITE JSON DE TAMANHO ILIMITADO (Essencial para busca global)
+    });
     
     if (!response.ok) {
       return res.status(response.status).json({ 
@@ -45,11 +44,12 @@ app.post("/login", async (req, res) => {
     const data = await response.json();
     res.json(data);
   } catch (err) {
+    console.error("Erro Login/Busca:", err.message);
     res.status(500).json({ error: "Falha de conexão", detalhe: err.message });
   }
 });
 
-// ROTA DE DETALHES (Elenco, Capas, Episódios)
+// INFO DETALHADA PARA ELENCO E EXTENSÃO DE VÍDEO
 app.post("/info", async (req, res) => {
   try {
     const { dns, username, password, type, id } = req.body;
@@ -58,7 +58,7 @@ app.post("/info", async (req, res) => {
     
     const url = `${dns}/player_api.php?username=${username}&password=${password}&action=${actionType}&${idParam}=${id}`;
     
-    const response = await fetch(url, { headers: standardHeaders, timeout: 10000 });
+    const response = await fetch(url, { headers: standardHeaders, timeout: 15000 });
     const data = await response.json();
     res.json(data);
   } catch (err) {
@@ -75,32 +75,35 @@ app.get("/img", async (req, res) => {
   } catch { res.status(500).send("Erro imagem"); }
 });
 
-// PROXY DE PLAYER (CORRIGIDO PARA PC, IPHONE E ANDROID)
+// PROXY DE PLAYER (CORRIGIDO: SUPORTE A RANGE E SEM COMPRESSÃO)
 app.get("/play", async (req, res) => {
   try {
     const streamUrl = req.query.url;
     const range = req.headers.range;
 
     const fetchOptions = {
-      headers: { ...standardHeaders, ...(range && { Range: range }) }
+      headers: { ...standardHeaders, ...(range && { Range: range }) },
+      compress: false // ESSENCIAL: Impede corrupção do arquivo de vídeo no stream
     };
 
     const r = await fetch(streamUrl, fetchOptions);
 
+    // Headers cruciais para o Player do iPhone/Android/Windows conseguir navegar no vídeo
     res.set("Content-Type", r.headers.get("content-type") || "video/mp4");
     res.set("Accept-Ranges", "bytes");
+    
     if (r.headers.get("content-range")) res.set("Content-Range", r.headers.get("content-range"));
     if (r.headers.get("content-length")) res.set("Content-Length", r.headers.get("content-length"));
 
     res.status(r.status);
     r.body.pipe(res);
-  } catch {
+  } catch (err) {
+    console.error("Erro Stream Player:", err.message);
     res.status(500).send("Erro ao reproduzir");
   }
 });
 
 const PORT = process.env.PORT || 8080;
-// Escuta em 0.0.0.0 para compatibilidade total com Fly.io e Railway
 app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Servidor rodando na porta ${PORT}`);
+    console.log(`Servidor Master v8.0 rodando na porta ${PORT}`);
 });
