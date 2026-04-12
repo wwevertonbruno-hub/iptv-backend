@@ -6,7 +6,7 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Headers atualizados (funcionando sem 403)
+// 🔥 EXATAMENTE IGUAL AO SEU QUE FUNCIONA
 const standardHeaders = {
   "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
   "Accept": "*/*",
@@ -14,11 +14,11 @@ const standardHeaders = {
 };
 
 app.get("/", (req, res) => {
-  res.send("Backend IPTV v6.0 (EPG Inteligente) 🚀");
+  res.send("Backend IPTV FINAL (LOGIN ORIGINAL + iOS FIX) 🚀");
 });
 
 
-// ================= LOGIN =================
+// ================= LOGIN (NÃO MEXER) =================
 app.post("/login", async (req, res) => {
   try {
     const { dns, username, password, action } = req.body;
@@ -27,9 +27,8 @@ app.post("/login", async (req, res) => {
     const url = `${dns}/player_api.php?username=${username}&password=${password}&action=${act}`;
 
     const response = await fetch(url, {
-      headers: standardHeaders,
-      timeout: 30000,
-      size: 0
+      headers: standardHeaders
+      // 🔥 REMOVIDO timeout e size
     });
 
     if (!response.ok) {
@@ -51,89 +50,64 @@ app.post("/login", async (req, res) => {
 });
 
 
-// ================= INFO =================
-app.post("/info", async (req, res) => {
+// ================= PLAYER (SÓ AQUI MEXE) =================
+app.get("/play", async (req, res) => {
   try {
-    const { dns, username, password, type, id } = req.body;
+    const streamUrl = req.query.url;
 
-    const actionType = type === "series" ? "get_series_info" : "get_vod_info";
-    const idParam = type === "series" ? "series_id" : "vod_id";
-
-    const url = `${dns}/player_api.php?username=${username}&password=${password}&action=${actionType}&${idParam}=${id}`;
-
-    const response = await fetch(url, {
-      headers: standardHeaders,
-      timeout: 10000
-    });
-
-    const data = await response.json();
-    res.json(data);
-
-  } catch {
-    res.status(500).json({ error: "Erro ao buscar detalhes" });
-  }
-});
-
-
-// ================= EPG INTELIGENTE =================
-app.post("/epg", async (req, res) => {
-  try {
-    const { dns, username, password, stream_id } = req.body;
-
-    if (!dns || !username || !password || !stream_id) {
-      return res.status(400).json({
-        error: "Preencha dns, username, password e stream_id"
-      });
+    if (!streamUrl) {
+      return res.status(400).send("URL não informada");
     }
 
-    // 1️⃣ tenta EPG curto
-    let url = `${dns}/player_api.php?username=${username}&password=${password}&action=get_short_epg&stream_id=${stream_id}`;
-    
-    let response = await fetch(url, {
-      headers: standardHeaders,
-      timeout: 15000
+    const response = await fetch(streamUrl, {
+      headers: standardHeaders
     });
 
-    let data = await response.json();
+    const contentType = response.headers.get("content-type") || "";
 
-    // 2️⃣ fallback automático se vazio
-    if (!data.epg_listings || data.epg_listings.length === 0) {
-      url = `${dns}/player_api.php?username=${username}&password=${password}&action=get_simple_data_table&stream_id=${stream_id}`;
-      
-      response = await fetch(url, {
-        headers: standardHeaders,
-        timeout: 15000
+    // 🔥 HLS (.m3u8) → FIX iOS
+    if (streamUrl.includes(".m3u8") || contentType.includes("mpegurl")) {
+      let body = await response.text();
+
+      const baseUrl = streamUrl.substring(0, streamUrl.lastIndexOf("/") + 1);
+
+      body = body.replace(/(?!#)(.*)/g, (line) => {
+        if (!line || line.startsWith("#")) return line;
+
+        const absoluteUrl = line.startsWith("http")
+          ? line
+          : baseUrl + line;
+
+        return `/play?url=${encodeURIComponent(absoluteUrl)}`;
       });
 
-      data = await response.json();
+      res.setHeader("Content-Type", "application/vnd.apple.mpegurl");
+      res.setHeader("Access-Control-Allow-Origin", "*");
+
+      return res.send(body);
     }
 
-    // 3️⃣ decode base64
-    let epg = [];
+    // 🔥 VOD NORMAL
+    const range = req.headers.range;
 
-    if (data.epg_listings) {
-      epg = data.epg_listings.map(item => ({
-        title: item.title
-          ? Buffer.from(item.title, "base64").toString("utf-8")
-          : "",
-        description: item.description
-          ? Buffer.from(item.description, "base64").toString("utf-8")
-          : "",
-        start: item.start,
-        end: item.end
-      }));
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Content-Type", contentType || "video/mp4");
+    res.setHeader("Accept-Ranges", "bytes");
+
+    if (range) {
+      const stream = await fetch(streamUrl, {
+        headers: { ...standardHeaders, Range: range }
+      });
+
+      res.status(206);
+      return stream.body.pipe(res);
     }
 
-    res.json({
-      total: epg.length,
-      epg
-    });
+    response.body.pipe(res);
 
   } catch (err) {
-    res.status(500).json({
-      error: "Erro ao carregar EPG",
-      detalhe: err.message
-    });
+    console.error(err);
+    res.status(500).send("Erro no player");
   }
 });
 
@@ -146,42 +120,6 @@ app.get("/img", async (req, res) => {
     r.body.pipe(res);
   } catch {
     res.status(500).send("Erro imagem");
-  }
-});
-
-
-// ================= PLAYER =================
-app.get("/play", async (req, res) => {
-  try {
-    const streamUrl = req.query.url;
-    const range = req.headers.range;
-
-    const fetchOptions = {
-      headers: {
-        ...standardHeaders,
-        ...(range && { Range: range })
-      },
-      compress: false
-    };
-
-    const r = await fetch(streamUrl, fetchOptions);
-
-    res.set("Content-Type", r.headers.get("content-type") || "video/mp4");
-    res.set("Accept-Ranges", "bytes");
-
-    if (r.headers.get("content-range")) {
-      res.set("Content-Range", r.headers.get("content-range"));
-    }
-
-    if (r.headers.get("content-length")) {
-      res.set("Content-Length", r.headers.get("content-length"));
-    }
-
-    res.status(r.status);
-    r.body.pipe(res);
-
-  } catch {
-    res.status(500).send("Erro ao reproduzir");
   }
 });
 
