@@ -6,7 +6,7 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// HEADERS (ANTI BLOQUEIO IPTV)
+// Headers OTIMIZADOS (evita 403)
 const standardHeaders = {
   "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
   "Accept": "*/*",
@@ -14,7 +14,7 @@ const standardHeaders = {
 };
 
 app.get("/", (req, res) => {
-  res.send("Backend IPTV v8.0 (iOS FIX + HLS PROXY) 🚀");
+  res.send("Backend IPTV v5.1 (EPG Smart + Anti-403) 🚀");
 });
 
 
@@ -51,7 +51,31 @@ app.post("/login", async (req, res) => {
 });
 
 
-// ================= EPG =================
+// ================= INFO =================
+app.post("/info", async (req, res) => {
+  try {
+    const { dns, username, password, type, id } = req.body;
+
+    const actionType = type === "series" ? "get_series_info" : "get_vod_info";
+    const idParam = type === "series" ? "series_id" : "vod_id";
+
+    const url = `${dns}/player_api.php?username=${username}&password=${password}&action=${actionType}&${idParam}=${id}`;
+
+    const response = await fetch(url, {
+      headers: standardHeaders,
+      timeout: 10000
+    });
+
+    const data = await response.json();
+    res.json(data);
+
+  } catch {
+    res.status(500).json({ error: "Erro ao buscar detalhes" });
+  }
+});
+
+
+// ================= EPG (SMART + FALLBACK) =================
 app.post("/epg", async (req, res) => {
   try {
     const { dns, username, password, stream_id } = req.body;
@@ -62,6 +86,7 @@ app.post("/epg", async (req, res) => {
       });
     }
 
+    // 1️⃣ tenta EPG curto
     let url = `${dns}/player_api.php?username=${username}&password=${password}&action=get_short_epg&stream_id=${stream_id}`;
     
     let response = await fetch(url, {
@@ -71,6 +96,7 @@ app.post("/epg", async (req, res) => {
 
     let data = await response.json();
 
+    // 2️⃣ fallback se vier vazio
     if (!data.epg_listings || data.epg_listings.length === 0) {
       url = `${dns}/player_api.php?username=${username}&password=${password}&action=get_simple_data_table&stream_id=${stream_id}`;
       
@@ -82,6 +108,7 @@ app.post("/epg", async (req, res) => {
       data = await response.json();
     }
 
+    // decode base64
     let epg = [];
 
     if (data.epg_listings) {
@@ -104,65 +131,9 @@ app.post("/epg", async (req, res) => {
 
   } catch (err) {
     res.status(500).json({
-      error: "Erro ao carregar EPG",
+      error: "Erro no EPG",
       detalhe: err.message
     });
-  }
-});
-
-
-// ================= PLAYER (HLS PROXY COMPLETO) =================
-app.get("/play", async (req, res) => {
-  try {
-    const streamUrl = req.query.url;
-
-    if (!streamUrl) {
-      return res.status(400).send("URL do stream não informada");
-    }
-
-    console.log("STREAM:", streamUrl);
-
-    const response = await fetch(streamUrl, {
-      headers: standardHeaders
-    });
-
-    const contentType = response.headers.get("content-type") || "";
-
-    // 🔥 PLAYLIST (.m3u8)
-    if (contentType.includes("mpegurl")) {
-      let body = await response.text();
-
-      const baseUrl = streamUrl.substring(0, streamUrl.lastIndexOf("/") + 1);
-
-      // 🔥 REESCREVE TODOS OS SEGMENTOS (.ts)
-      body = body.replace(/(?!#)(.*)/g, (line) => {
-        if (line.trim() === "" || line.startsWith("#")) return line;
-
-        const absoluteUrl = line.startsWith("http")
-          ? line
-          : baseUrl + line;
-
-        return `/play?url=${encodeURIComponent(absoluteUrl)}`;
-      });
-
-      res.setHeader("Content-Type", "application/vnd.apple.mpegurl");
-      res.setHeader("Access-Control-Allow-Origin", "*");
-      res.setHeader("Cache-Control", "no-cache");
-
-      return res.send(body);
-    }
-
-    // 🔥 SEGMENTOS (.ts)
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Content-Type", contentType || "video/mp2t");
-    res.setHeader("Cache-Control", "no-cache");
-    res.setHeader("Connection", "keep-alive");
-
-    response.body.pipe(res);
-
-  } catch (err) {
-    console.error("ERRO PLAY:", err.message);
-    res.status(500).send("Erro ao reproduzir stream");
   }
 });
 
@@ -175,6 +146,42 @@ app.get("/img", async (req, res) => {
     r.body.pipe(res);
   } catch {
     res.status(500).send("Erro imagem");
+  }
+});
+
+
+// ================= PLAYER =================
+app.get("/play", async (req, res) => {
+  try {
+    const streamUrl = req.query.url;
+    const range = req.headers.range;
+
+    const fetchOptions = {
+      headers: {
+        ...standardHeaders,
+        ...(range && { Range: range })
+      },
+      compress: false
+    };
+
+    const r = await fetch(streamUrl, fetchOptions);
+
+    res.set("Content-Type", r.headers.get("content-type") || "video/mp4");
+    res.set("Accept-Ranges", "bytes");
+
+    if (r.headers.get("content-range")) {
+      res.set("Content-Range", r.headers.get("content-range"));
+    }
+
+    if (r.headers.get("content-length")) {
+      res.set("Content-Length", r.headers.get("content-length"));
+    }
+
+    res.status(r.status);
+    r.body.pipe(res);
+
+  } catch {
+    res.status(500).send("Erro ao reproduzir");
   }
 });
 
