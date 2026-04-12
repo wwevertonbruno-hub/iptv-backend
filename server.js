@@ -6,19 +6,15 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// 🔥 HEADERS ULTRA COMPLETOS (SIMULA APP + NAVEGADOR)
+// 🔥 HEADERS SIMPLES (ESSENCIAL PRA NÃO DAR 403)
 const standardHeaders = {
-  "User-Agent": "Mozilla/5.0 (Linux; Android 11; SM-G998B) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36",
+  "User-Agent": "Mozilla/5.0",
   "Accept": "*/*",
-  "Accept-Language": "en-US,en;q=0.9",
-  "X-Requested-With": "com.nst.iptvsmartersbox",
-  "Origin": "http://aptxu.com",
-  "Referer": "http://aptxu.com/",
   "Connection": "keep-alive"
 };
 
 app.get("/", (req, res) => {
-  res.send("Backend IPTV v10.0 (ANTI 403 + iOS FIX + FULL) 🚀");
+  res.send("Backend IPTV vFINAL (NO 403 + iOS FIX) 🚀");
 });
 
 
@@ -35,31 +31,6 @@ app.post("/login", async (req, res) => {
       timeout: 30000,
       size: 0
     });
-
-    // 🔥 TENTA SEGUNDO HEADER SE DER 403
-    if (response.status === 403) {
-      console.log("403 detectado → tentando fallback");
-
-      const fallbackHeaders = {
-        "User-Agent": "IPTVSmartersPlayer",
-        "Accept": "*/*",
-        "Connection": "keep-alive"
-      };
-
-      const retry = await fetch(url, {
-        headers: fallbackHeaders
-      });
-
-      if (!retry.ok) {
-        return res.status(403).json({
-          error: "IPTV bloqueou (403)",
-          dica: "Servidor bloqueando IP do Railway"
-        });
-      }
-
-      const data = await retry.json();
-      return res.json(data);
-    }
 
     if (!response.ok) {
       return res.status(response.status).json({
@@ -85,21 +56,22 @@ app.post("/epg", async (req, res) => {
   try {
     const { dns, username, password, stream_id } = req.body;
 
-    const url = `${dns}/player_api.php?username=${username}&password=${password}&action=get_short_epg&stream_id=${stream_id}`;
+    let url = `${dns}/player_api.php?username=${username}&password=${password}&action=get_short_epg&stream_id=${stream_id}`;
+    
+    let response = await fetch(url, { headers: standardHeaders });
+    let data = await response.json();
 
-    const response = await fetch(url, {
-      headers: standardHeaders
-    });
-
-    const data = await response.json();
+    if (!data.epg_listings || data.epg_listings.length === 0) {
+      url = `${dns}/player_api.php?username=${username}&password=${password}&action=get_simple_data_table&stream_id=${stream_id}`;
+      response = await fetch(url, { headers: standardHeaders });
+      data = await response.json();
+    }
 
     let epg = [];
 
     if (data.epg_listings) {
       epg = data.epg_listings.map(item => ({
-        title: item.title
-          ? Buffer.from(item.title, "base64").toString("utf-8")
-          : "",
+        title: item.title ? Buffer.from(item.title, "base64").toString("utf-8") : "",
         start: item.start,
         end: item.end
       }));
@@ -113,7 +85,7 @@ app.post("/epg", async (req, res) => {
 });
 
 
-// ================= PLAYER =================
+// ================= PLAYER (FIX iOS SEM DAR 403) =================
 app.get("/play", async (req, res) => {
   try {
     const streamUrl = req.query.url;
@@ -122,15 +94,13 @@ app.get("/play", async (req, res) => {
       return res.status(400).send("URL não informada");
     }
 
-    console.log("STREAM:", streamUrl);
-
     const response = await fetch(streamUrl, {
       headers: standardHeaders
     });
 
     const contentType = response.headers.get("content-type") || "";
 
-    // 🔥 HLS (.m3u8)
+    // 🔥 HLS (.m3u8) — REESCREVE PARA iOS
     if (streamUrl.includes(".m3u8") || contentType.includes("mpegurl")) {
       let body = await response.text();
 
@@ -152,7 +122,7 @@ app.get("/play", async (req, res) => {
       return res.send(body);
     }
 
-    // 🔥 VOD (.mp4 / .mkv)
+    // 🔥 VOD NORMAL
     const range = req.headers.range;
 
     res.setHeader("Access-Control-Allow-Origin", "*");
