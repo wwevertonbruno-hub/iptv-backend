@@ -6,6 +6,7 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// Cabeçalhos que você confirmou que funcionam (Bypass Especial)
 const standardHeaders = {
   "User-Agent": "IPTVSmartersPlayer",
   "Accept": "*/*",
@@ -16,17 +17,27 @@ const standardHeaders = {
   "Connection": "keep-alive"
 };
 
-app.get("/", (req, res) => res.send("Backend IPTV v10.0 (EPG + Ultra Speed) Online 🚀"));
+app.get("/", (req, res) => res.send("Backend IPTV v4.5 (Estável + EPG) Online 🚀"));
 
-// LOGIN E CONTEÚDO (Canais, VOD, Séries)
+// LOGIN E BUSCA POR AÇÃO
 app.post("/login", async (req, res) => {
   try {
     const { dns, username, password, action } = req.body;
     const act = action || "get_live_streams"; 
     const url = `${dns}/player_api.php?username=${username}&password=${password}&action=${act}`;
     
-    const response = await fetch(url, { headers: standardHeaders, timeout: 45000, size: 0 });
-    if (!response.ok) return res.status(response.status).json({ error: "Servidor IPTV recusou" });
+    const response = await fetch(url, { 
+      headers: standardHeaders, 
+      timeout: 30000, 
+      size: 0 
+    });
+    
+    if (!response.ok) {
+      return res.status(response.status).json({ 
+          error: "Servidor IPTV recusou", 
+          status_origem: response.status 
+      });
+    }
 
     const data = await response.json();
     res.json(data);
@@ -35,11 +46,11 @@ app.post("/login", async (req, res) => {
   }
 });
 
-// NOVA ROTA: EPG (Grade de Programação)
+// NOVA ROTA: EPG (Grade de Programação dos Canais)
 app.post("/epg", async (req, res) => {
   try {
     const { dns, username, password, stream_id } = req.body;
-    // Busca a programação curta do canal específico
+    // Busca a programação do canal específico (Short EPG)
     const url = `${dns}/player_api.php?username=${username}&password=${password}&action=get_short_epg&stream_id=${stream_id}`;
     
     const response = await fetch(url, { headers: standardHeaders, timeout: 15000 });
@@ -58,15 +69,15 @@ app.post("/info", async (req, res) => {
     const idParam = type === 'series' ? 'series_id' : 'vod_id';
     const url = `${dns}/player_api.php?username=${username}&password=${password}&action=${actionType}&${idParam}=${id}`;
     
-    const response = await fetch(url, { headers: standardHeaders, timeout: 15000 });
+    const response = await fetch(url, { headers: standardHeaders, timeout: 10000 });
     const data = await response.json();
     res.json(data);
   } catch (err) {
-    res.status(500).json({ error: "Erro detalhes" });
+    res.status(500).json({ error: "Erro ao buscar detalhes" });
   }
 });
 
-// PROXY DE IMAGENS
+// Proxy de Imagens
 app.get("/img", async (req, res) => {
   try {
     const r = await fetch(req.query.url, { headers: standardHeaders });
@@ -75,35 +86,27 @@ app.get("/img", async (req, res) => {
   } catch { res.status(500).send("Erro imagem"); }
 });
 
-// PROXY DE PLAYER (OTIMIZADO: FIX IOS DELAY + BYTES STREAM)
+// PROXY DE PLAYER
 app.get("/play", async (req, res) => {
   try {
     const streamUrl = req.query.url;
     const range = req.headers.range;
-    const isLive = streamUrl.includes("/live/");
 
     const fetchOptions = {
       headers: { ...standardHeaders, ...(range && { Range: range }) },
-      compress: false,
-      timeout: isLive ? 0 : 45000
+      compress: false 
     };
 
     const r = await fetch(streamUrl, fetchOptions);
 
     res.set("Content-Type", r.headers.get("content-type") || "video/mp4");
     res.set("Accept-Ranges", "bytes");
-    // Headers para forçar o player do iPhone a carregar mais rápido (sem cache)
-    res.set("Cache-Control", "no-cache, no-store, must-revalidate");
-
+    
     if (r.headers.get("content-range")) res.set("Content-Range", r.headers.get("content-range"));
     if (r.headers.get("content-length")) res.set("Content-Length", r.headers.get("content-length"));
 
     res.status(r.status);
     r.body.pipe(res);
-
-    req.on("close", () => {
-      if (r.body && r.body.destroy) r.body.destroy();
-    });
   } catch {
     res.status(500).send("Erro ao reproduzir");
   }
