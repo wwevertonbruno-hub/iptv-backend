@@ -6,19 +6,15 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Headers IPTV (Bypass)
+// Headers atualizados (funcionando sem 403)
 const standardHeaders = {
   "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
   "Accept": "*/*",
-  "Accept-Language": "en-US,en;q=0.9",
-  "X-Requested-With": "com.nst.iptvsmartersbox",
-  "Origin": "http://aptxu.com",
-  "Referer": "http://aptxu.com/",
   "Connection": "keep-alive"
 };
 
 app.get("/", (req, res) => {
-  res.send("Backend IPTV v5.0 (EPG + Proxy + Stable) 🚀");
+  res.send("Backend IPTV v6.0 (EPG Inteligente) 🚀");
 });
 
 
@@ -79,7 +75,7 @@ app.post("/info", async (req, res) => {
 });
 
 
-// ================= EPG =================
+// ================= EPG INTELIGENTE =================
 app.post("/epg", async (req, res) => {
   try {
     const { dns, username, password, stream_id } = req.body;
@@ -90,27 +86,33 @@ app.post("/epg", async (req, res) => {
       });
     }
 
-    const url = `${dns}/player_api.php?username=${username}&password=${password}&action=get_short_epg&stream_id=${stream_id}`;
-
-    const response = await fetch(url, {
+    // 1️⃣ tenta EPG curto
+    let url = `${dns}/player_api.php?username=${username}&password=${password}&action=get_short_epg&stream_id=${stream_id}`;
+    
+    let response = await fetch(url, {
       headers: standardHeaders,
       timeout: 15000
     });
 
-    if (!response.ok) {
-      return res.status(response.status).json({
-        error: "Erro ao buscar EPG",
-        status: response.status
+    let data = await response.json();
+
+    // 2️⃣ fallback automático se vazio
+    if (!data.epg_listings || data.epg_listings.length === 0) {
+      url = `${dns}/player_api.php?username=${username}&password=${password}&action=get_simple_data_table&stream_id=${stream_id}`;
+      
+      response = await fetch(url, {
+        headers: standardHeaders,
+        timeout: 15000
       });
+
+      data = await response.json();
     }
 
-    const data = await response.json();
-
-    // Decode base64 (se necessário)
-    let epgDecoded = [];
+    // 3️⃣ decode base64
+    let epg = [];
 
     if (data.epg_listings) {
-      epgDecoded = data.epg_listings.map(item => ({
+      epg = data.epg_listings.map(item => ({
         title: item.title
           ? Buffer.from(item.title, "base64").toString("utf-8")
           : "",
@@ -123,13 +125,13 @@ app.post("/epg", async (req, res) => {
     }
 
     res.json({
-      raw: data,
-      epg: epgDecoded
+      total: epg.length,
+      epg
     });
 
   } catch (err) {
     res.status(500).json({
-      error: "Falha ao carregar EPG",
+      error: "Erro ao carregar EPG",
       detalhe: err.message
     });
   }
