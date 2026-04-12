@@ -6,44 +6,57 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Cabeçalhos que você confirmou que funcionam (Bypass Especial)
+// Headers de Navegador Real para evitar detecção de Datacenter (Erro 403)
 const standardHeaders = {
-  "User-Agent": "IPTVSmartersPlayer",
+  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
   "Accept": "*/*",
-  "Accept-Language": "en-US,en;q=0.9",
+  "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
   "X-Requested-With": "com.nst.iptvsmartersbox",
   "Origin": "http://aptxu.com",
   "Referer": "http://aptxu.com/",
   "Connection": "keep-alive"
 };
 
-app.get("/", (req, res) => res.send("Backend IPTV v4.5 (Bypass + Mobile Fix + Big Lists) Online 🚀"));
+app.get("/", (req, res) => res.send("Backend IPTV v10.5 (EPG + Anti-Block) Online 🚀"));
 
-// LOGIN E BUSCA POR AÇÃO (Sua rota principal com correções de tamanho)
+// LOGIN E CONTEÚDO (Canais, VOD, Séries)
 app.post("/login", async (req, res) => {
   try {
     const { dns, username, password, action } = req.body;
     const act = action || "get_live_streams"; 
     const url = `${dns}/player_api.php?username=${username}&password=${password}&action=${act}`;
     
-    // timeout e size:0 garantem que a lista gigante de filmes chegue inteira
     const response = await fetch(url, { 
-      headers: standardHeaders, 
-      timeout: 30000, 
-      size: 0 
+        headers: standardHeaders, 
+        timeout: 45000, 
+        size: 0 
     });
     
     if (!response.ok) {
-      return res.status(response.status).json({ 
-          error: "Servidor IPTV recusou", 
-          status_origem: response.status 
-      });
+        return res.status(response.status).json({ 
+            error: "Servidor IPTV recusou", 
+            status_origem: response.status 
+        });
     }
 
     const data = await response.json();
     res.json(data);
   } catch (err) {
     res.status(500).json({ error: "Falha de conexão", detalhe: err.message });
+  }
+});
+
+// NOVA ROTA: EPG (Grade de Programação dos Canais)
+app.post("/epg", async (req, res) => {
+  try {
+    const { dns, username, password, stream_id } = req.body;
+    const url = `${dns}/player_api.php?username=${username}&password=${password}&action=get_short_epg&stream_id=${stream_id}`;
+    
+    const response = await fetch(url, { headers: standardHeaders, timeout: 15000 });
+    const data = await response.json();
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: "Erro ao buscar EPG" });
   }
 });
 
@@ -55,15 +68,15 @@ app.post("/info", async (req, res) => {
     const idParam = type === 'series' ? 'series_id' : 'vod_id';
     const url = `${dns}/player_api.php?username=${username}&password=${password}&action=${actionType}&${idParam}=${id}`;
     
-    const response = await fetch(url, { headers: standardHeaders, timeout: 10000 });
+    const response = await fetch(url, { headers: standardHeaders, timeout: 15000 });
     const data = await response.json();
     res.json(data);
   } catch (err) {
-    res.status(500).json({ error: "Erro ao buscar detalhes" });
+    res.status(500).json({ error: "Erro detalhes" });
   }
 });
 
-// Proxy de Imagens
+// PROXY DE IMAGENS
 app.get("/img", async (req, res) => {
   try {
     const r = await fetch(req.query.url, { headers: standardHeaders });
@@ -72,7 +85,7 @@ app.get("/img", async (req, res) => {
   } catch { res.status(500).send("Erro imagem"); }
 });
 
-// PROXY DE PLAYER (CORREÇÃO ESSENCIAL PARA IPHONE E ANDROID)
+// PROXY DE PLAYER (OTIMIZADO PARA PC, IPHONE E ANDROID)
 app.get("/play", async (req, res) => {
   try {
     const streamUrl = req.query.url;
@@ -80,20 +93,17 @@ app.get("/play", async (req, res) => {
 
     const fetchOptions = {
       headers: { ...standardHeaders, ...(range && { Range: range }) },
-      compress: false // EVITA QUE O VÍDEO SEJA CORROMPIDO NO STREAMING
+      compress: false 
     };
 
     const r = await fetch(streamUrl, fetchOptions);
 
     res.set("Content-Type", r.headers.get("content-type") || "video/mp4");
     res.set("Accept-Ranges", "bytes");
-    
-    if (r.headers.get("content-range")) {
-      res.set("Content-Range", r.headers.get("content-range"));
-    }
-    if (r.headers.get("content-length")) {
-      res.set("Content-Length", r.headers.get("content-length"));
-    }
+    res.set("Cache-Control", "no-cache");
+
+    if (r.headers.get("content-range")) res.set("Content-Range", r.headers.get("content-range"));
+    if (r.headers.get("content-length")) res.set("Content-Length", r.headers.get("content-length"));
 
     res.status(r.status);
     r.body.pipe(res);
