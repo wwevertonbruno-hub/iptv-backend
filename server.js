@@ -17,15 +17,16 @@ const standardHeaders = {
   "Connection": "keep-alive"
 };
 
-app.get("/", (req, res) => res.send("Backend IPTV v4.5 (Estável + EPG) Online 🚀"));
+app.get("/", (req, res) => res.send("Backend IPTV v4.5 (Bypass + Mobile Fix + Big Lists) Online 🚀"));
 
-// LOGIN E BUSCA POR AÇÃO
+// LOGIN E BUSCA POR AÇÃO (Sua rota principal com correções de tamanho)
 app.post("/login", async (req, res) => {
   try {
     const { dns, username, password, action } = req.body;
     const act = action || "get_live_streams"; 
     const url = `${dns}/player_api.php?username=${username}&password=${password}&action=${act}`;
     
+    // timeout e size:0 garantem que a lista gigante de filmes chegue inteira
     const response = await fetch(url, { 
       headers: standardHeaders, 
       timeout: 30000, 
@@ -43,21 +44,6 @@ app.post("/login", async (req, res) => {
     res.json(data);
   } catch (err) {
     res.status(500).json({ error: "Falha de conexão", detalhe: err.message });
-  }
-});
-
-// NOVA ROTA: EPG (Grade de Programação dos Canais)
-app.post("/epg", async (req, res) => {
-  try {
-    const { dns, username, password, stream_id } = req.body;
-    // Busca a programação do canal específico (Short EPG)
-    const url = `${dns}/player_api.php?username=${username}&password=${password}&action=get_short_epg&stream_id=${stream_id}`;
-    
-    const response = await fetch(url, { headers: standardHeaders, timeout: 15000 });
-    const data = await response.json();
-    res.json(data);
-  } catch (err) {
-    res.status(500).json({ error: "Erro ao buscar EPG" });
   }
 });
 
@@ -86,7 +72,7 @@ app.get("/img", async (req, res) => {
   } catch { res.status(500).send("Erro imagem"); }
 });
 
-// PROXY DE PLAYER
+// PROXY DE PLAYER (CORREÇÃO ESSENCIAL PARA IPHONE E ANDROID)
 app.get("/play", async (req, res) => {
   try {
     const streamUrl = req.query.url;
@@ -94,7 +80,7 @@ app.get("/play", async (req, res) => {
 
     const fetchOptions = {
       headers: { ...standardHeaders, ...(range && { Range: range }) },
-      compress: false 
+      compress: false // EVITA QUE O VÍDEO SEJA CORROMPIDO NO STREAMING
     };
 
     const r = await fetch(streamUrl, fetchOptions);
@@ -102,8 +88,12 @@ app.get("/play", async (req, res) => {
     res.set("Content-Type", r.headers.get("content-type") || "video/mp4");
     res.set("Accept-Ranges", "bytes");
     
-    if (r.headers.get("content-range")) res.set("Content-Range", r.headers.get("content-range"));
-    if (r.headers.get("content-length")) res.set("Content-Length", r.headers.get("content-length"));
+    if (r.headers.get("content-range")) {
+      res.set("Content-Range", r.headers.get("content-range"));
+    }
+    if (r.headers.get("content-length")) {
+      res.set("Content-Length", r.headers.get("content-length"));
+    }
 
     res.status(r.status);
     r.body.pipe(res);
