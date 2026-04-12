@@ -6,7 +6,7 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// 🔥 EXATAMENTE IGUAL AO SEU QUE FUNCIONA
+// HEADERS (ANTI BLOQUEIO IPTV)
 const standardHeaders = {
   "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
   "Accept": "*/*",
@@ -14,11 +14,11 @@ const standardHeaders = {
 };
 
 app.get("/", (req, res) => {
-  res.send("Backend IPTV FINAL (LOGIN ORIGINAL + iOS FIX) 🚀");
+  res.send("Backend IPTV v8.0 (iOS FIX + HLS PROXY) 🚀");
 });
 
 
-// ================= LOGIN (NÃO MEXER) =================
+// ================= LOGIN =================
 app.post("/login", async (req, res) => {
   try {
     const { dns, username, password, action } = req.body;
@@ -27,8 +27,9 @@ app.post("/login", async (req, res) => {
     const url = `${dns}/player_api.php?username=${username}&password=${password}&action=${act}`;
 
     const response = await fetch(url, {
-      headers: standardHeaders
-      // 🔥 REMOVIDO timeout e size
+      headers: standardHeaders,
+      timeout: 30000,
+      size: 0
     });
 
     if (!response.ok) {
@@ -50,14 +51,76 @@ app.post("/login", async (req, res) => {
 });
 
 
-// ================= PLAYER (SÓ AQUI MEXE) =================
+// ================= EPG =================
+app.post("/epg", async (req, res) => {
+  try {
+    const { dns, username, password, stream_id } = req.body;
+
+    if (!dns || !username || !password || !stream_id) {
+      return res.status(400).json({
+        error: "Preencha dns, username, password e stream_id"
+      });
+    }
+
+    let url = `${dns}/player_api.php?username=${username}&password=${password}&action=get_short_epg&stream_id=${stream_id}`;
+    
+    let response = await fetch(url, {
+      headers: standardHeaders,
+      timeout: 15000
+    });
+
+    let data = await response.json();
+
+    if (!data.epg_listings || data.epg_listings.length === 0) {
+      url = `${dns}/player_api.php?username=${username}&password=${password}&action=get_simple_data_table&stream_id=${stream_id}`;
+      
+      response = await fetch(url, {
+        headers: standardHeaders,
+        timeout: 15000
+      });
+
+      data = await response.json();
+    }
+
+    let epg = [];
+
+    if (data.epg_listings) {
+      epg = data.epg_listings.map(item => ({
+        title: item.title
+          ? Buffer.from(item.title, "base64").toString("utf-8")
+          : "",
+        description: item.description
+          ? Buffer.from(item.description, "base64").toString("utf-8")
+          : "",
+        start: item.start,
+        end: item.end
+      }));
+    }
+
+    res.json({
+      total: epg.length,
+      epg
+    });
+
+  } catch (err) {
+    res.status(500).json({
+      error: "Erro ao carregar EPG",
+      detalhe: err.message
+    });
+  }
+});
+
+
+// ================= PLAYER (HLS PROXY COMPLETO) =================
 app.get("/play", async (req, res) => {
   try {
     const streamUrl = req.query.url;
 
     if (!streamUrl) {
-      return res.status(400).send("URL não informada");
+      return res.status(400).send("URL do stream não informada");
     }
+
+    console.log("STREAM:", streamUrl);
 
     const response = await fetch(streamUrl, {
       headers: standardHeaders
@@ -65,14 +128,15 @@ app.get("/play", async (req, res) => {
 
     const contentType = response.headers.get("content-type") || "";
 
-    // 🔥 HLS (.m3u8) → FIX iOS
-    if (streamUrl.includes(".m3u8") || contentType.includes("mpegurl")) {
+    // 🔥 PLAYLIST (.m3u8)
+    if (contentType.includes("mpegurl")) {
       let body = await response.text();
 
       const baseUrl = streamUrl.substring(0, streamUrl.lastIndexOf("/") + 1);
 
+      // 🔥 REESCREVE TODOS OS SEGMENTOS (.ts)
       body = body.replace(/(?!#)(.*)/g, (line) => {
-        if (!line || line.startsWith("#")) return line;
+        if (line.trim() === "" || line.startsWith("#")) return line;
 
         const absoluteUrl = line.startsWith("http")
           ? line
@@ -83,31 +147,22 @@ app.get("/play", async (req, res) => {
 
       res.setHeader("Content-Type", "application/vnd.apple.mpegurl");
       res.setHeader("Access-Control-Allow-Origin", "*");
+      res.setHeader("Cache-Control", "no-cache");
 
       return res.send(body);
     }
 
-    // 🔥 VOD NORMAL
-    const range = req.headers.range;
-
+    // 🔥 SEGMENTOS (.ts)
     res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Content-Type", contentType || "video/mp4");
-    res.setHeader("Accept-Ranges", "bytes");
-
-    if (range) {
-      const stream = await fetch(streamUrl, {
-        headers: { ...standardHeaders, Range: range }
-      });
-
-      res.status(206);
-      return stream.body.pipe(res);
-    }
+    res.setHeader("Content-Type", contentType || "video/mp2t");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
 
     response.body.pipe(res);
 
   } catch (err) {
-    console.error(err);
-    res.status(500).send("Erro no player");
+    console.error("ERRO PLAY:", err.message);
+    res.status(500).send("Erro ao reproduzir stream");
   }
 });
 
