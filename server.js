@@ -6,7 +6,7 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// HEADERS OTIMIZADOS (ANTI-BLOQUEIO)
+// HEADERS (ANTI BLOQUEIO IPTV)
 const standardHeaders = {
   "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
   "Accept": "*/*",
@@ -14,7 +14,7 @@ const standardHeaders = {
 };
 
 app.get("/", (req, res) => {
-  res.send("Backend IPTV v7.0 (PLAYER FIX + EPG + STABLE) 🚀");
+  res.send("Backend IPTV v8.0 (iOS FIX + HLS PROXY) 🚀");
 });
 
 
@@ -111,7 +111,7 @@ app.post("/epg", async (req, res) => {
 });
 
 
-// ================= PLAYER (CORRIGIDO) =================
+// ================= PLAYER (HLS PROXY COMPLETO) =================
 app.get("/play", async (req, res) => {
   try {
     const streamUrl = req.query.url;
@@ -122,43 +122,43 @@ app.get("/play", async (req, res) => {
 
     console.log("STREAM:", streamUrl);
 
-    const range = req.headers.range;
+    const response = await fetch(streamUrl, {
+      headers: standardHeaders
+    });
 
-    const fetchOptions = {
-      headers: {
-        ...standardHeaders,
-        ...(range && { Range: range })
-      },
-      compress: false
-    };
+    const contentType = response.headers.get("content-type") || "";
 
-    const r = await fetch(streamUrl, fetchOptions);
+    // 🔥 PLAYLIST (.m3u8)
+    if (contentType.includes("mpegurl")) {
+      let body = await response.text();
 
-    // HEADERS ESSENCIAIS
+      const baseUrl = streamUrl.substring(0, streamUrl.lastIndexOf("/") + 1);
+
+      // 🔥 REESCREVE TODOS OS SEGMENTOS (.ts)
+      body = body.replace(/(?!#)(.*)/g, (line) => {
+        if (line.trim() === "" || line.startsWith("#")) return line;
+
+        const absoluteUrl = line.startsWith("http")
+          ? line
+          : baseUrl + line;
+
+        return `/play?url=${encodeURIComponent(absoluteUrl)}`;
+      });
+
+      res.setHeader("Content-Type", "application/vnd.apple.mpegurl");
+      res.setHeader("Access-Control-Allow-Origin", "*");
+      res.setHeader("Cache-Control", "no-cache");
+
+      return res.send(body);
+    }
+
+    // 🔥 SEGMENTOS (.ts)
     res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Access-Control-Allow-Headers", "*");
-    res.setHeader("Access-Control-Allow-Methods", "GET, HEAD");
-
-    res.setHeader(
-      "Content-Type",
-      r.headers.get("content-type") || "application/vnd.apple.mpegurl"
-    );
-
-    res.setHeader("Accept-Ranges", "bytes");
+    res.setHeader("Content-Type", contentType || "video/mp2t");
     res.setHeader("Cache-Control", "no-cache");
     res.setHeader("Connection", "keep-alive");
 
-    if (r.headers.get("content-range")) {
-      res.setHeader("Content-Range", r.headers.get("content-range"));
-    }
-
-    if (r.headers.get("content-length")) {
-      res.setHeader("Content-Length", r.headers.get("content-length"));
-    }
-
-    res.status(r.status);
-
-    r.body.pipe(res);
+    response.body.pipe(res);
 
   } catch (err) {
     console.error("ERRO PLAY:", err.message);
