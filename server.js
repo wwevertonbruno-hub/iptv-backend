@@ -14,7 +14,7 @@ const standardHeaders = {
 };
 
 app.get("/", (req, res) => {
-  res.send("Backend IPTV v8.0 (iOS FIX + HLS PROXY) 🚀");
+  res.send("Backend IPTV v9.0 (LIVE + VOD + iOS FULL FIX) 🚀");
 });
 
 
@@ -111,7 +111,7 @@ app.post("/epg", async (req, res) => {
 });
 
 
-// ================= PLAYER (HLS PROXY COMPLETO) =================
+// ================= PLAYER (HLS + VOD COMPLETO) =================
 app.get("/play", async (req, res) => {
   try {
     const streamUrl = req.query.url;
@@ -128,13 +128,15 @@ app.get("/play", async (req, res) => {
 
     const contentType = response.headers.get("content-type") || "";
 
-    // 🔥 PLAYLIST (.m3u8)
-    if (contentType.includes("mpegurl")) {
+    // ================= HLS (.m3u8) =================
+    if (
+      streamUrl.includes(".m3u8") ||
+      contentType.includes("mpegurl")
+    ) {
       let body = await response.text();
 
       const baseUrl = streamUrl.substring(0, streamUrl.lastIndexOf("/") + 1);
 
-      // 🔥 REESCREVE TODOS OS SEGMENTOS (.ts)
       body = body.replace(/(?!#)(.*)/g, (line) => {
         if (line.trim() === "" || line.startsWith("#")) return line;
 
@@ -152,17 +154,39 @@ app.get("/play", async (req, res) => {
       return res.send(body);
     }
 
-    // 🔥 SEGMENTOS (.ts)
+    // ================= VOD (.mp4 / .mkv) =================
+    const range = req.headers.range;
+
     res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Content-Type", contentType || "video/mp2t");
+    res.setHeader("Content-Type", contentType || "video/mp4");
+    res.setHeader("Accept-Ranges", "bytes");
     res.setHeader("Cache-Control", "no-cache");
-    res.setHeader("Connection", "keep-alive");
+
+    if (range) {
+      const stream = await fetch(streamUrl, {
+        headers: {
+          ...standardHeaders,
+          Range: range
+        }
+      });
+
+      if (stream.headers.get("content-range")) {
+        res.setHeader("Content-Range", stream.headers.get("content-range"));
+      }
+
+      if (stream.headers.get("content-length")) {
+        res.setHeader("Content-Length", stream.headers.get("content-length"));
+      }
+
+      res.status(206);
+      return stream.body.pipe(res);
+    }
 
     response.body.pipe(res);
 
   } catch (err) {
     console.error("ERRO PLAY:", err.message);
-    res.status(500).send("Erro ao reproduzir stream");
+    res.status(500).send("Erro ao reproduzir");
   }
 });
 
