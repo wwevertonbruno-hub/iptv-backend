@@ -1,81 +1,25 @@
-const express = require("express");
-const fetch = require("node-fetch");
-const cors = require("cors");
-
-const app = express();
 app.use(cors());
 app.use(express.json());
 
-const PORT = process.env.PORT || 8080;
-
-// 🔒 Headers mais compatíveis com IPTV
-const headers = {
-  "User-Agent": "IPTVSmartersPlayer",
+// Headers atualizados (funcionando sem 403)
+// HEADERS OTIMIZADOS (ANTI-BLOQUEIO)
+const standardHeaders = {
+  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
   "Accept": "*/*",
-  "Accept-Language": "en-US,en;q=0.9",
-  "Referer": "http://aptxu.com/",
-  "Origin": "http://aptxu.com"
+  "Connection": "keep-alive"
 };
 
 app.get("/", (req, res) => {
-  res.send("Backend IPTV (estável - sem proxy de vídeo) 🚀");
+  res.send("Backend IPTV v6.0 (EPG Inteligente) 🚀");
+  res.send("Backend IPTV v7.0 (PLAYER FIX + EPG + STABLE) 🚀");
 });
 
 
-// ================= LOGIN / LISTA =================
-app.post("/login", async (req, res) => {
-  try {
-    const { dns, username, password, action } = req.body;
-
-    if (!dns || !username || !password) {
-      return res.status(400).json({ erro: "Dados incompletos" });
-    }
-
-    const act = action || "get_live_streams";
-
-    const url = `${dns}/player_api.php?username=${username}&password=${password}&action=${act}`;
-
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 15000);
-
-    const response = await fetch(url, {
-      headers,
-      signal: controller.signal
-    });
-
-    clearTimeout(timeout);
-
-    const text = await response.text();
-
-    // 🔥 Detecta bloqueio Cloudflare
-    if (text.includes("Cloudflare") || text.includes("blocked")) {
-      return res.status(403).json({
-        erro: "Bloqueado pelo servidor IPTV"
-      });
-    }
-
-    // tenta converter para JSON
-    let data;
-    try {
-      data = JSON.parse(text);
-    } catch {
-      return res.status(500).json({
-        erro: "Resposta inválida do IPTV"
-      });
-    }
-
-    res.json(data);
-
-  } catch (err) {
-    res.status(500).json({
-      erro: "Falha de conexão",
-      detalhe: err.message
-    });
-  }
+@@ -51,31 +51,7 @@ app.post("/login", async (req, res) => {
 });
 
 
-// ================= INFO (VOD / SERIES) =================
+// ================= INFO =================
 app.post("/info", async (req, res) => {
   try {
     const { dns, username, password, type, id } = req.body;
@@ -85,42 +29,129 @@ app.post("/info", async (req, res) => {
 
     const url = `${dns}/player_api.php?username=${username}&password=${password}&action=${actionType}&${idParam}=${id}`;
 
-    const response = await fetch(url, { headers });
-    const text = await response.text();
+    const response = await fetch(url, {
+      headers: standardHeaders,
+      timeout: 10000
+    });
 
-    if (text.includes("Cloudflare")) {
-      return res.status(403).json({ erro: "Bloqueado pelo IPTV" });
-    }
+    const data = await response.json();
+    res.json(data);
 
-    res.json(JSON.parse(text));
-
-  } catch (err) {
-    res.status(500).json({ erro: "Erro ao buscar detalhes" });
+  } catch {
+    res.status(500).json({ error: "Erro ao buscar detalhes" });
   }
 });
 
 
-// ================= IMAGENS =================
+// ================= EPG INTELIGENTE =================
+// ================= EPG =================
+app.post("/epg", async (req, res) => {
+  try {
+    const { dns, username, password, stream_id } = req.body;
+@@ -86,7 +62,6 @@ app.post("/epg", async (req, res) => {
+      });
+    }
+
+    // 1️⃣ tenta EPG curto
+    let url = `${dns}/player_api.php?username=${username}&password=${password}&action=get_short_epg&stream_id=${stream_id}`;
+
+    let response = await fetch(url, {
+@@ -96,7 +71,6 @@ app.post("/epg", async (req, res) => {
+
+    let data = await response.json();
+
+    // 2️⃣ fallback automático se vazio
+    if (!data.epg_listings || data.epg_listings.length === 0) {
+      url = `${dns}/player_api.php?username=${username}&password=${password}&action=get_simple_data_table&stream_id=${stream_id}`;
+
+@@ -108,7 +82,6 @@ app.post("/epg", async (req, res) => {
+      data = await response.json();
+    }
+
+    // 3️⃣ decode base64
+    let epg = [];
+
+    if (data.epg_listings) {
+@@ -138,22 +111,17 @@ app.post("/epg", async (req, res) => {
+});
+
+
+// ================= IMG =================
 app.get("/img", async (req, res) => {
   try {
-    const url = req.query.url;
-
-    const response = await fetch(url, { headers });
-
-    res.setHeader(
-      "Content-Type",
-      response.headers.get("content-type") || "image/jpeg"
-    );
-
-    response.body.pipe(res);
-
+    const r = await fetch(req.query.url, { headers: standardHeaders });
+    res.set("Content-Type", r.headers.get("content-type"));
+    r.body.pipe(res);
   } catch {
     res.status(500).send("Erro imagem");
   }
 });
 
 
-// ================= START =================
-app.listen(PORT, "0.0.0.0", () => {
-  console.log(`Servidor rodando na porta ${PORT}`);
+// ================= PLAYER =================
+// ================= PLAYER (CORRIGIDO) =================
+app.get("/play", async (req, res) => {
+  try {
+    const streamUrl = req.query.url;
+
+    if (!streamUrl) {
+      return res.status(400).send("URL do stream não informada");
+    }
+
+    console.log("STREAM:", streamUrl);
+
+    const range = req.headers.range;
+
+    const fetchOptions = {
+@@ -166,22 +134,47 @@ app.get("/play", async (req, res) => {
+
+    const r = await fetch(streamUrl, fetchOptions);
+
+    res.set("Content-Type", r.headers.get("content-type") || "video/mp4");
+    res.set("Accept-Ranges", "bytes");
+    // HEADERS ESSENCIAIS
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Headers", "*");
+    res.setHeader("Access-Control-Allow-Methods", "GET, HEAD");
+
+    res.setHeader(
+      "Content-Type",
+      r.headers.get("content-type") || "application/vnd.apple.mpegurl"
+    );
+
+    res.setHeader("Accept-Ranges", "bytes");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
+
+    if (r.headers.get("content-range")) {
+      res.set("Content-Range", r.headers.get("content-range"));
+      res.setHeader("Content-Range", r.headers.get("content-range"));
+    }
+
+    if (r.headers.get("content-length")) {
+      res.set("Content-Length", r.headers.get("content-length"));
+      res.setHeader("Content-Length", r.headers.get("content-length"));
+    }
+
+    res.status(r.status);
+
+    r.body.pipe(res);
+
+  } catch (err) {
+    console.error("ERRO PLAY:", err.message);
+    res.status(500).send("Erro ao reproduzir stream");
+  }
+});
+
+
+// ================= IMG =================
+app.get("/img", async (req, res) => {
+  try {
+    const r = await fetch(req.query.url, { headers: standardHeaders });
+    res.set("Content-Type", r.headers.get("content-type"));
+    r.body.pipe(res);
+  } catch {
+    res.status(500).send("Erro ao reproduzir");
+    res.status(500).send("Erro imagem");
+  }
 });
