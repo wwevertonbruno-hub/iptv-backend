@@ -6,111 +6,78 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Headers de Navegador Real para evitar detecção de Datacenter (Erro 403)
+// Headers para evitar bloqueio
 const standardHeaders = {
-  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+  "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile Safari/604.1",
   "Accept": "*/*",
-  "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
-  "X-Requested-With": "com.nst.iptvsmartersbox",
-  "Origin": "http://aptxu.com",
-  "Referer": "http://aptxu.com/",
+  "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8",
   "Connection": "keep-alive"
 };
 
-app.get("/", (req, res) => res.send("Backend IPTV v10.5 (EPG + Anti-Block) Online 🚀"));
-
-// LOGIN E CONTEÚDO (Canais, VOD, Séries)
-app.post("/login", async (req, res) => {
-  try {
-    const { dns, username, password, action } = req.body;
-    const act = action || "get_live_streams"; 
-    const url = `${dns}/player_api.php?username=${username}&password=${password}&action=${act}`;
-    
-    const response = await fetch(url, { 
-        headers: standardHeaders, 
-        timeout: 45000, 
-        size: 0 
-    });
-    
-    if (!response.ok) {
-        return res.status(response.status).json({ 
-            error: "Servidor IPTV recusou", 
-            status_origem: response.status 
-        });
-    }
-
-    const data = await response.json();
-    res.json(data);
-  } catch (err) {
-    res.status(500).json({ error: "Falha de conexão", detalhe: err.message });
-  }
+app.get("/", (req, res) => {
+  res.send("Backend IPTV iOS Ready 🚀");
 });
 
-// NOVA ROTA: EPG (Grade de Programação dos Canais)
-app.post("/epg", async (req, res) => {
-  try {
-    const { dns, username, password, stream_id } = req.body;
-    const url = `${dns}/player_api.php?username=${username}&password=${password}&action=get_short_epg&stream_id=${stream_id}`;
-    
-    const response = await fetch(url, { headers: standardHeaders, timeout: 15000 });
-    const data = await response.json();
-    res.json(data);
-  } catch (err) {
-    res.status(500).json({ error: "Erro ao buscar EPG" });
-  }
-});
-
-// INFO E ELENCO
-app.post("/info", async (req, res) => {
-  try {
-    const { dns, username, password, type, id } = req.body;
-    const actionType = type === 'series' ? 'get_series_info' : 'get_vod_info';
-    const idParam = type === 'series' ? 'series_id' : 'vod_id';
-    const url = `${dns}/player_api.php?username=${username}&password=${password}&action=${actionType}&${idParam}=${id}`;
-    
-    const response = await fetch(url, { headers: standardHeaders, timeout: 15000 });
-    const data = await response.json();
-    res.json(data);
-  } catch (err) {
-    res.status(500).json({ error: "Erro detalhes" });
-  }
-});
-
-// PROXY DE IMAGENS
-app.get("/img", async (req, res) => {
-  try {
-    const r = await fetch(req.query.url, { headers: standardHeaders });
-    res.set("Content-Type", r.headers.get("content-type"));
-    r.body.pipe(res);
-  } catch { res.status(500).send("Erro imagem"); }
-});
-
-// PROXY DE PLAYER (OTIMIZADO PARA PC, IPHONE E ANDROID)
+// PLAYER (100% ajustado para iOS)
 app.get("/play", async (req, res) => {
   try {
     const streamUrl = req.query.url;
     const range = req.headers.range;
 
-    const fetchOptions = {
-      headers: { ...standardHeaders, ...(range && { Range: range }) },
-      compress: false 
+    if (!streamUrl) {
+      return res.status(400).send("URL não fornecida");
+    }
+
+    const headers = {
+      ...standardHeaders,
+      ...(range ? { Range: range } : {})
     };
 
-    const r = await fetch(streamUrl, fetchOptions);
+    const response = await fetch(streamUrl, {
+      headers,
+      compress: false
+    });
 
-    res.set("Content-Type", r.headers.get("content-type") || "video/mp4");
-    res.set("Accept-Ranges", "bytes");
-    res.set("Cache-Control", "no-cache");
+    // Detecta tipo de stream
+    let contentType = response.headers.get("content-type") || "";
 
-    if (r.headers.get("content-range")) res.set("Content-Range", r.headers.get("content-range"));
-    if (r.headers.get("content-length")) res.set("Content-Length", r.headers.get("content-length"));
+    if (streamUrl.includes(".m3u8")) {
+      contentType = "application/vnd.apple.mpegurl";
+    } else if (contentType.includes("mpegurl")) {
+      contentType = "application/vnd.apple.mpegurl";
+    } else if (contentType.includes("mp2t")) {
+      contentType = "video/mp2t";
+    } else {
+      contentType = "video/mp4";
+    }
 
-    res.status(r.status);
-    r.body.pipe(res);
-  } catch {
-    res.status(500).send("Erro ao reproduzir");
+    res.setHeader("Content-Type", contentType);
+    res.setHeader("Accept-Ranges", "bytes");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
+
+    if (response.headers.get("content-length")) {
+      res.setHeader("Content-Length", response.headers.get("content-length"));
+    }
+
+    if (response.headers.get("content-range")) {
+      res.setHeader("Content-Range", response.headers.get("content-range"));
+      res.status(206);
+    } else if (range) {
+      res.status(206);
+    } else {
+      res.status(200);
+    }
+
+    response.body.pipe(res);
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).send("Erro ao reproduzir stream");
   }
 });
 
 const PORT = process.env.PORT || 8080;
-app.listen(PORT, "0.0.0.0");
+app.listen(PORT, "0.0.0.0", () => {
+  console.log("Servidor rodando na porta", PORT);
+});
