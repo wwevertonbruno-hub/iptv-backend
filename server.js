@@ -8,65 +8,63 @@ app.use(express.json());
 
 const PORT = process.env.PORT || 8080;
 
-// 🔒 Controle de carga
-let activeRequests = 0;
-const MAX_REQUESTS = 10;
-
-// Headers mais realistas
-const standardHeaders = {
-  "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X)",
+// 🔒 Headers mais compatíveis com IPTV
+const headers = {
+  "User-Agent": "IPTVSmartersPlayer",
   "Accept": "*/*",
+  "Accept-Language": "en-US,en;q=0.9",
   "Referer": "http://aptxu.com/",
-  "Origin": "http://aptxu.com",
-  "Connection": "keep-alive"
+  "Origin": "http://aptxu.com"
 };
 
 app.get("/", (req, res) => {
-  res.send("Servidor estável 🚀");
+  res.send("Backend IPTV (estável - sem proxy de vídeo) 🚀");
 });
 
 
-// ================= LOGIN =================
+// ================= LOGIN / LISTA =================
 app.post("/login", async (req, res) => {
-  if (activeRequests > MAX_REQUESTS) {
-    return res.status(503).json({ erro: "Servidor ocupado" });
-  }
-
-  activeRequests++;
-
   try {
     const { dns, username, password, action } = req.body;
 
-    const url = `${dns}/player_api.php?username=${username}&password=${password}&action=${action || "get_live_streams"}`;
+    if (!dns || !username || !password) {
+      return res.status(400).json({ erro: "Dados incompletos" });
+    }
+
+    const act = action || "get_live_streams";
+
+    const url = `${dns}/player_api.php?username=${username}&password=${password}&action=${act}`;
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 15000);
 
     const response = await fetch(url, {
-      headers: standardHeaders,
+      headers,
       signal: controller.signal
     });
 
     clearTimeout(timeout);
 
-    // 🔥 Detecta bloqueio Cloudflare (HTML)
     const text = await response.text();
 
+    // 🔥 Detecta bloqueio Cloudflare
     if (text.includes("Cloudflare") || text.includes("blocked")) {
       return res.status(403).json({
-        erro: "Bloqueado pelo servidor IPTV (Cloudflare)"
+        erro: "Bloqueado pelo servidor IPTV"
       });
     }
 
     // tenta converter para JSON
+    let data;
     try {
-      const data = JSON.parse(text);
-      res.json(data);
+      data = JSON.parse(text);
     } catch {
-      res.status(500).json({
+      return res.status(500).json({
         erro: "Resposta inválida do IPTV"
       });
     }
+
+    res.json(data);
 
   } catch (err) {
     res.status(500).json({
@@ -74,70 +72,55 @@ app.post("/login", async (req, res) => {
       detalhe: err.message
     });
   }
-
-  activeRequests--;
 });
 
 
-// ================= PLAYER (LIMITADO) =================
-app.get("/play", async (req, res) => {
-  // 🔴 Limite mais agressivo pra evitar crash
-  if (activeRequests > 3) {
-    return res.status(503).send("Servidor ocupado");
-  }
-
-  activeRequests++;
-
+// ================= INFO (VOD / SERIES) =================
+app.post("/info", async (req, res) => {
   try {
-    const streamUrl = req.query.url;
+    const { dns, username, password, type, id } = req.body;
 
-    if (!streamUrl) {
-      activeRequests--;
-      return res.status(400).send("URL não fornecida");
+    const actionType = type === "series" ? "get_series_info" : "get_vod_info";
+    const idParam = type === "series" ? "series_id" : "vod_id";
+
+    const url = `${dns}/player_api.php?username=${username}&password=${password}&action=${actionType}&${idParam}=${id}`;
+
+    const response = await fetch(url, { headers });
+    const text = await response.text();
+
+    if (text.includes("Cloudflare")) {
+      return res.status(403).json({ erro: "Bloqueado pelo IPTV" });
     }
 
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 20000);
-
-    const response = await fetch(streamUrl, {
-      headers: standardHeaders,
-      signal: controller.signal
-    });
-
-    clearTimeout(timeout);
-
-    const contentType = response.headers.get("content-type") || "video/mp4";
-
-    res.setHeader("Content-Type", contentType);
-    res.setHeader("Connection", "close");
-
-    const stream = response.body;
-
-    // 🔥 proteção contra crash
-    stream.on("error", () => {
-      res.end();
-    });
-
-    res.on("close", () => {
-      stream.destroy();
-      activeRequests--;
-    });
-
-    res.on("finish", () => {
-      stream.destroy();
-      activeRequests--;
-    });
-
-    stream.pipe(res);
+    res.json(JSON.parse(text));
 
   } catch (err) {
-    activeRequests--;
-    res.status(500).send("Erro no stream");
+    res.status(500).json({ erro: "Erro ao buscar detalhes" });
+  }
+});
+
+
+// ================= IMAGENS =================
+app.get("/img", async (req, res) => {
+  try {
+    const url = req.query.url;
+
+    const response = await fetch(url, { headers });
+
+    res.setHeader(
+      "Content-Type",
+      response.headers.get("content-type") || "image/jpeg"
+    );
+
+    response.body.pipe(res);
+
+  } catch {
+    res.status(500).send("Erro imagem");
   }
 });
 
 
 // ================= START =================
 app.listen(PORT, "0.0.0.0", () => {
-  console.log("Servidor rodando na porta", PORT);
+  console.log(`Servidor rodando na porta ${PORT}`);
 });
