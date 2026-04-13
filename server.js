@@ -6,28 +6,38 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-let activeStreams = 0;
-const MAX_STREAMS = 3; // evita crash
+const PORT = process.env.PORT || 8080;
 
+// 🔒 Controle de carga
+let activeRequests = 0;
+const MAX_REQUESTS = 10;
+
+// Headers mais realistas
 const standardHeaders = {
-  "User-Agent": "IPTVSmartersPlayer",
+  "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X)",
   "Accept": "*/*",
-  "Origin": "http://aptxu.com",
   "Referer": "http://aptxu.com/",
+  "Origin": "http://aptxu.com",
   "Connection": "keep-alive"
 };
 
 app.get("/", (req, res) => {
-  res.send("Backend estável 🚀");
+  res.send("Servidor estável 🚀");
 });
 
-// LOGIN (seguro)
+
+// ================= LOGIN =================
 app.post("/login", async (req, res) => {
+  if (activeRequests > MAX_REQUESTS) {
+    return res.status(503).json({ erro: "Servidor ocupado" });
+  }
+
+  activeRequests++;
+
   try {
     const { dns, username, password, action } = req.body;
-    const act = action || "get_live_streams";
 
-    const url = `${dns}/player_api.php?username=${username}&password=${password}&action=${act}`;
+    const url = `${dns}/player_api.php?username=${username}&password=${password}&action=${action || "get_live_streams"}`;
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 15000);
@@ -39,70 +49,95 @@ app.post("/login", async (req, res) => {
 
     clearTimeout(timeout);
 
-    if (!response.ok) {
-      return res.status(response.status).json({
-        error: "Servidor IPTV recusou",
-        status: response.status
+    // 🔥 Detecta bloqueio Cloudflare (HTML)
+    const text = await response.text();
+
+    if (text.includes("Cloudflare") || text.includes("blocked")) {
+      return res.status(403).json({
+        erro: "Bloqueado pelo servidor IPTV (Cloudflare)"
       });
     }
 
-    const data = await response.json();
-    res.json(data);
+    // tenta converter para JSON
+    try {
+      const data = JSON.parse(text);
+      res.json(data);
+    } catch {
+      res.status(500).json({
+        erro: "Resposta inválida do IPTV"
+      });
+    }
 
   } catch (err) {
-    res.status(500).json({ error: "Falha", detalhe: err.message });
+    res.status(500).json({
+      erro: "Falha de conexão",
+      detalhe: err.message
+    });
   }
+
+  activeRequests--;
 });
 
-// PLAYER (ANTI-CRASH)
+
+// ================= PLAYER (LIMITADO) =================
 app.get("/play", async (req, res) => {
-  if (activeStreams >= MAX_STREAMS) {
-    return res.status(503).send("Muitos streams ativos");
+  // 🔴 Limite mais agressivo pra evitar crash
+  if (activeRequests > 3) {
+    return res.status(503).send("Servidor ocupado");
   }
 
-  activeStreams++;
+  activeRequests++;
 
   try {
     const streamUrl = req.query.url;
 
+    if (!streamUrl) {
+      activeRequests--;
+      return res.status(400).send("URL não fornecida");
+    }
+
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 20000);
 
-    const r = await fetch(streamUrl, {
+    const response = await fetch(streamUrl, {
       headers: standardHeaders,
       signal: controller.signal
     });
 
     clearTimeout(timeout);
 
-    res.setHeader("Content-Type", r.headers.get("content-type") || "video/mp4");
-    res.setHeader("Accept-Ranges", "bytes");
+    const contentType = response.headers.get("content-type") || "video/mp4";
 
-    const stream = r.body;
+    res.setHeader("Content-Type", contentType);
+    res.setHeader("Connection", "close");
 
-    // 🔥 evita crash
+    const stream = response.body;
+
+    // 🔥 proteção contra crash
     stream.on("error", () => {
       res.end();
     });
 
     res.on("close", () => {
       stream.destroy();
-      activeStreams--;
+      activeRequests--;
     });
 
     res.on("finish", () => {
       stream.destroy();
-      activeStreams--;
+      activeRequests--;
     });
 
     stream.pipe(res);
 
   } catch (err) {
-    activeStreams--;
+    activeRequests--;
     res.status(500).send("Erro no stream");
   }
 });
 
-app.listen(8080, () => {
-  console.log("Servidor rodando");
+
+// ================= START =================
+app.listen(PORT, "0.0.0.0", () => {
+  console.log("Servidor rodando na porta", PORT);
 });
