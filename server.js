@@ -1,47 +1,46 @@
 const express = require("express");
-const fetch = require("node-fetch");
+const axios = require("axios");
 const cors = require("cors");
 
 const app = express();
 app.use(cors());
-app.use(express.json());
 
-// Headers para evitar bloqueio
-const standardHeaders = {
-  "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile Safari/604.1",
+// Headers mais "reais"
+const headersPadrao = {
+  "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X)",
   "Accept": "*/*",
-  "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8",
   "Connection": "keep-alive"
 };
 
 app.get("/", (req, res) => {
-  res.send("Backend IPTV iOS Ready 🚀");
+  res.send("Servidor ONLINE 🚀");
 });
 
-// PLAYER (100% ajustado para iOS)
+// PLAYER ESTÁVEL
 app.get("/play", async (req, res) => {
   try {
-    const streamUrl = req.query.url;
+    const url = req.query.url;
     const range = req.headers.range;
 
-    if (!streamUrl) {
-      return res.status(400).send("URL não fornecida");
+    if (!url) {
+      return res.status(400).send("Sem URL");
     }
 
-    const headers = {
-      ...standardHeaders,
-      ...(range ? { Range: range } : {})
-    };
-
-    const response = await fetch(streamUrl, {
-      headers,
-      compress: false
+    const response = await axios({
+      method: "GET",
+      url: url,
+      responseType: "stream",
+      headers: {
+        ...headersPadrao,
+        ...(range ? { Range: range } : {})
+      },
+      timeout: 20000
     });
 
-    // Detecta tipo de stream
-    let contentType = response.headers.get("content-type") || "";
+    // Detecta tipo
+    let contentType = response.headers["content-type"] || "";
 
-    if (streamUrl.includes(".m3u8")) {
+    if (url.includes(".m3u8")) {
       contentType = "application/vnd.apple.mpegurl";
     } else if (contentType.includes("mpegurl")) {
       contentType = "application/vnd.apple.mpegurl";
@@ -53,31 +52,27 @@ app.get("/play", async (req, res) => {
 
     res.setHeader("Content-Type", contentType);
     res.setHeader("Accept-Ranges", "bytes");
-    res.setHeader("Cache-Control", "no-cache");
     res.setHeader("Connection", "keep-alive");
 
-    if (response.headers.get("content-length")) {
-      res.setHeader("Content-Length", response.headers.get("content-length"));
+    if (response.headers["content-length"]) {
+      res.setHeader("Content-Length", response.headers["content-length"]);
     }
 
-    if (response.headers.get("content-range")) {
-      res.setHeader("Content-Range", response.headers.get("content-range"));
-      res.status(206);
-    } else if (range) {
+    if (response.headers["content-range"]) {
+      res.setHeader("Content-Range", response.headers["content-range"]);
       res.status(206);
     } else {
       res.status(200);
     }
 
-    response.body.pipe(res);
+    response.data.pipe(res);
 
   } catch (err) {
-    console.error(err);
-    res.status(500).send("Erro ao reproduzir stream");
+    console.log("ERRO:", err.message);
+    res.status(500).send("Erro no stream");
   }
 });
 
-const PORT = process.env.PORT || 8080;
-app.listen(PORT, "0.0.0.0", () => {
-  console.log("Servidor rodando na porta", PORT);
+app.listen(8080, () => {
+  console.log("Rodando na porta 8080");
 });
