@@ -1,158 +1,105 @@
 const express = require("express");
-const axios = require("axios");
+const fetch = require("node-fetch");
 const cors = require("cors");
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-const PORT = process.env.PORT || 8080;
-
-// 🔒 Limite de conexões simultâneas (evita crash)
-let activeStreams = 0;
-const MAX_STREAMS = 5;
-
-// HEADERS realistas
-const headersPadrao = {
-  "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X)",
+// Cabeçalhos de Bypass para simular dispositivo real e evitar Erro 403
+const standardHeaders = {
+  "User-Agent": "IPTVSmartersPlayer",
   "Accept": "*/*",
-  "Referer": "http://aptxu.com/",
+  "Accept-Language": "en-US,en;q=0.9",
+  "X-Requested-With": "com.nst.iptvsmartersbox",
   "Origin": "http://aptxu.com",
+  "Referer": "http://aptxu.com/",
   "Connection": "keep-alive"
 };
 
-app.get("/", (req, res) => {
-  res.send("Servidor IPTV Estável 🚀");
-});
+app.get("/", (req, res) => res.send("Backend IPTV v4.5 (Dynamic Action) Online 🚀"));
 
-
-// ================= LOGIN =================
+// ROTA DE LOGIN E CONTEÚDO DINÂMICO
 app.post("/login", async (req, res) => {
   try {
     const { dns, username, password, action } = req.body;
+    
+    // Se o app não enviar 'action', o padrão é buscar canais ao vivo
+    const act = action || "get_live_streams"; 
+    
+    // Monta a URL baseada no que o app quer (Canais, Filmes, Séries ou Categorias)
+    const url = `${dns}/player_api.php?username=${username}&password=${password}&action=${act}`;
+    
+    console.log(`[SOLICITAÇÃO] Buscando action: ${act}`);
 
-    const url = `${dns}/player_api.php?username=${username}&password=${password}&action=${action || "get_live_streams"}`;
-
-    const response = await axios.get(url, {
-      headers: headersPadrao,
-      timeout: 30000
-    });
-
-    res.json(response.data);
-
-  } catch (err) {
-    console.log("ERRO LOGIN:", err.message);
-
-    if (err.response) {
-      return res.status(err.response.status).json({
-        erro: "Servidor IPTV recusou",
-        status: err.response.status
+    const response = await fetch(url, { headers: standardHeaders, timeout: 15000 });
+    
+    if (!response.ok) {
+      return res.status(response.status).json({ 
+          error: "Servidor IPTV recusou", 
+          status_origem: response.status 
       });
     }
 
-    res.status(500).json({
-      erro: "Falha de conexão",
-      detalhe: err.message
-    });
-  }
-});
-
-
-// ================= LOGIN TEST =================
-app.get("/login-test", async (req, res) => {
-  try {
-    const { dns, username, password } = req.query;
-
-    const url = `${dns}/player_api.php?username=${username}&password=${password}&action=get_live_streams`;
-
-    const response = await axios.get(url, {
-      headers: headersPadrao,
-      timeout: 30000
-    });
-
-    res.json(response.data);
-
+    const data = await response.json();
+    res.json(data);
   } catch (err) {
-    res.status(500).json({ erro: err.message });
+    res.status(500).json({ error: "Falha de conexão", detalhe: err.message });
   }
 });
 
-
-// ================= PLAYER =================
-app.get("/play", async (req, res) => {
-  if (activeStreams >= MAX_STREAMS) {
-    return res.status(503).send("Servidor ocupado, tente novamente");
-  }
-
-  activeStreams++;
-
+// ROTA DE DETALHES (Elenco, Capas, Episódios)
+app.post("/info", async (req, res) => {
   try {
-    const url = req.query.url;
+    const { dns, username, password, type, id } = req.body;
+    const actionType = type === 'series' ? 'get_series_info' : 'get_vod_info';
+    const idParam = type === 'series' ? 'series_id' : 'vod_id';
+    
+    const url = `${dns}/player_api.php?username=${username}&password=${password}&action=${actionType}&${idParam}=${id}`;
+    
+    const response = await fetch(url, { headers: standardHeaders, timeout: 10000 });
+    const data = await response.json();
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: "Erro ao buscar detalhes" });
+  }
+});
+
+// PROXY DE IMAGENS
+app.get("/img", async (req, res) => {
+  try {
+    const r = await fetch(req.query.url, { headers: standardHeaders });
+    res.set("Content-Type", r.headers.get("content-type"));
+    r.body.pipe(res);
+  } catch { res.status(500).send("Erro imagem"); }
+});
+
+// PROXY DE PLAYER (CORRIGIDO PARA PC, IPHONE E ANDROID)
+app.get("/play", async (req, res) => {
+  try {
+    const streamUrl = req.query.url;
     const range = req.headers.range;
 
-    if (!url) {
-      activeStreams--;
-      return res.status(400).send("URL não fornecida");
-    }
+    const fetchOptions = {
+      headers: { ...standardHeaders, ...(range && { Range: range }) }
+    };
 
-    const response = await axios({
-      method: "GET",
-      url: url,
-      responseType: "stream",
-      headers: {
-        ...headersPadrao,
-        ...(range ? { Range: range } : {})
-      },
-      timeout: 30000
-    });
+    const r = await fetch(streamUrl, fetchOptions);
 
-    let contentType = response.headers["content-type"] || "";
+    res.set("Content-Type", r.headers.get("content-type") || "video/mp4");
+    res.set("Accept-Ranges", "bytes");
+    if (r.headers.get("content-range")) res.set("Content-Range", r.headers.get("content-range"));
+    if (r.headers.get("content-length")) res.set("Content-Length", r.headers.get("content-length"));
 
-    if (url.includes(".m3u8")) {
-      contentType = "application/vnd.apple.mpegurl";
-    } else if (contentType.includes("mpegurl")) {
-      contentType = "application/vnd.apple.mpegurl";
-    } else if (contentType.includes("mp2t")) {
-      contentType = "video/mp2t";
-    } else {
-      contentType = "video/mp4";
-    }
-
-    res.setHeader("Content-Type", contentType);
-    res.setHeader("Accept-Ranges", "bytes");
-    res.setHeader("Cache-Control", "no-cache");
-
-    const stream = response.data;
-
-    // 🔥 Evita crash
-    stream.on("error", (err) => {
-      console.log("STREAM ERROR:", err.message);
-      res.end();
-    });
-
-    res.on("close", () => {
-      stream.destroy();
-      activeStreams--;
-      console.log("Conexão fechada | Ativos:", activeStreams);
-    });
-
-    res.on("finish", () => {
-      stream.destroy();
-      activeStreams--;
-      console.log("Finalizado | Ativos:", activeStreams);
-    });
-
-    stream.pipe(res);
-
-  } catch (err) {
-    activeStreams--;
-    console.log("ERRO PLAY:", err.message);
-    res.status(500).send("Erro no stream");
+    res.status(r.status);
+    r.body.pipe(res);
+  } catch {
+    res.status(500).send("Erro ao reproduzir");
   }
 });
 
-
-// ================= START =================
+const PORT = process.env.PORT || 8080;
+// Escuta em 0.0.0.0 para compatibilidade total com Fly.io e Railway
 app.listen(PORT, "0.0.0.0", () => {
-  console.log("Servidor rodando na porta", PORT);
+    console.log(`Servidor rodando na porta ${PORT}`);
 });
