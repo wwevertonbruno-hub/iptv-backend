@@ -1,157 +1,158 @@
+const express = require("express");
+const axios = require("axios");
+const cors = require("cors");
+
+const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Headers atualizados (funcionando sem 403)
-// HEADERS OTIMIZADOS (ANTI-BLOQUEIO)
-const standardHeaders = {
-  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
+const PORT = process.env.PORT || 8080;
+
+// 🔒 Limite de conexões simultâneas (evita crash)
+let activeStreams = 0;
+const MAX_STREAMS = 5;
+
+// HEADERS realistas
+const headersPadrao = {
+  "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X)",
   "Accept": "*/*",
+  "Referer": "http://aptxu.com/",
+  "Origin": "http://aptxu.com",
   "Connection": "keep-alive"
 };
 
 app.get("/", (req, res) => {
-  res.send("Backend IPTV v6.0 (EPG Inteligente) 🚀");
-  res.send("Backend IPTV v7.0 (PLAYER FIX + EPG + STABLE) 🚀");
+  res.send("Servidor IPTV Estável 🚀");
 });
 
 
-@@ -51,31 +51,7 @@ app.post("/login", async (req, res) => {
-});
-
-
-// ================= INFO =================
-app.post("/info", async (req, res) => {
+// ================= LOGIN =================
+app.post("/login", async (req, res) => {
   try {
-    const { dns, username, password, type, id } = req.body;
+    const { dns, username, password, action } = req.body;
 
-    const actionType = type === "series" ? "get_series_info" : "get_vod_info";
-    const idParam = type === "series" ? "series_id" : "vod_id";
+    const url = `${dns}/player_api.php?username=${username}&password=${password}&action=${action || "get_live_streams"}`;
 
-    const url = `${dns}/player_api.php?username=${username}&password=${password}&action=${actionType}&${idParam}=${id}`;
-
-    const response = await fetch(url, {
-      headers: standardHeaders,
-      timeout: 10000
+    const response = await axios.get(url, {
+      headers: headersPadrao,
+      timeout: 30000
     });
 
-    const data = await response.json();
-    res.json(data);
+    res.json(response.data);
 
-  } catch {
-    res.status(500).json({ error: "Erro ao buscar detalhes" });
+  } catch (err) {
+    console.log("ERRO LOGIN:", err.message);
+
+    if (err.response) {
+      return res.status(err.response.status).json({
+        erro: "Servidor IPTV recusou",
+        status: err.response.status
+      });
+    }
+
+    res.status(500).json({
+      erro: "Falha de conexão",
+      detalhe: err.message
+    });
   }
 });
 
 
-// ================= EPG INTELIGENTE =================
-// ================= EPG =================
-app.post("/epg", async (req, res) => {
+// ================= LOGIN TEST =================
+app.get("/login-test", async (req, res) => {
   try {
-    const { dns, username, password, stream_id } = req.body;
-@@ -86,7 +62,6 @@ app.post("/epg", async (req, res) => {
-      });
-    }
+    const { dns, username, password } = req.query;
 
-    // 1️⃣ tenta EPG curto
-    let url = `${dns}/player_api.php?username=${username}&password=${password}&action=get_short_epg&stream_id=${stream_id}`;
+    const url = `${dns}/player_api.php?username=${username}&password=${password}&action=get_live_streams`;
 
-    let response = await fetch(url, {
-@@ -96,7 +71,6 @@ app.post("/epg", async (req, res) => {
+    const response = await axios.get(url, {
+      headers: headersPadrao,
+      timeout: 30000
+    });
 
-    let data = await response.json();
+    res.json(response.data);
 
-    // 2️⃣ fallback automático se vazio
-    if (!data.epg_listings || data.epg_listings.length === 0) {
-      url = `${dns}/player_api.php?username=${username}&password=${password}&action=get_simple_data_table&stream_id=${stream_id}`;
-
-@@ -108,7 +82,6 @@ app.post("/epg", async (req, res) => {
-      data = await response.json();
-    }
-
-    // 3️⃣ decode base64
-    let epg = [];
-
-    if (data.epg_listings) {
-@@ -138,22 +111,17 @@ app.post("/epg", async (req, res) => {
-});
-
-
-// ================= IMG =================
-app.get("/img", async (req, res) => {
-  try {
-    const r = await fetch(req.query.url, { headers: standardHeaders });
-    res.set("Content-Type", r.headers.get("content-type"));
-    r.body.pipe(res);
-  } catch {
-    res.status(500).send("Erro imagem");
+  } catch (err) {
+    res.status(500).json({ erro: err.message });
   }
 });
 
 
 // ================= PLAYER =================
-// ================= PLAYER (CORRIGIDO) =================
 app.get("/play", async (req, res) => {
+  if (activeStreams >= MAX_STREAMS) {
+    return res.status(503).send("Servidor ocupado, tente novamente");
+  }
+
+  activeStreams++;
+
   try {
-    const streamUrl = req.query.url;
-
-    if (!streamUrl) {
-      return res.status(400).send("URL do stream não informada");
-    }
-
-    console.log("STREAM:", streamUrl);
-
+    const url = req.query.url;
     const range = req.headers.range;
 
-    const fetchOptions = {
-@@ -166,22 +134,47 @@ app.get("/play", async (req, res) => {
+    if (!url) {
+      activeStreams--;
+      return res.status(400).send("URL não fornecida");
+    }
 
-    const r = await fetch(streamUrl, fetchOptions);
+    const response = await axios({
+      method: "GET",
+      url: url,
+      responseType: "stream",
+      headers: {
+        ...headersPadrao,
+        ...(range ? { Range: range } : {})
+      },
+      timeout: 30000
+    });
 
-    res.set("Content-Type", r.headers.get("content-type") || "video/mp4");
-    res.set("Accept-Ranges", "bytes");
-    // HEADERS ESSENCIAIS
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Access-Control-Allow-Headers", "*");
-    res.setHeader("Access-Control-Allow-Methods", "GET, HEAD");
+    let contentType = response.headers["content-type"] || "";
 
-    res.setHeader(
-      "Content-Type",
-      r.headers.get("content-type") || "application/vnd.apple.mpegurl"
-    );
+    if (url.includes(".m3u8")) {
+      contentType = "application/vnd.apple.mpegurl";
+    } else if (contentType.includes("mpegurl")) {
+      contentType = "application/vnd.apple.mpegurl";
+    } else if (contentType.includes("mp2t")) {
+      contentType = "video/mp2t";
+    } else {
+      contentType = "video/mp4";
+    }
 
+    res.setHeader("Content-Type", contentType);
     res.setHeader("Accept-Ranges", "bytes");
     res.setHeader("Cache-Control", "no-cache");
-    res.setHeader("Connection", "keep-alive");
 
-    if (r.headers.get("content-range")) {
-      res.set("Content-Range", r.headers.get("content-range"));
-      res.setHeader("Content-Range", r.headers.get("content-range"));
-    }
+    const stream = response.data;
 
-    if (r.headers.get("content-length")) {
-      res.set("Content-Length", r.headers.get("content-length"));
-      res.setHeader("Content-Length", r.headers.get("content-length"));
-    }
+    // 🔥 Evita crash
+    stream.on("error", (err) => {
+      console.log("STREAM ERROR:", err.message);
+      res.end();
+    });
 
-    res.status(r.status);
+    res.on("close", () => {
+      stream.destroy();
+      activeStreams--;
+      console.log("Conexão fechada | Ativos:", activeStreams);
+    });
 
-    r.body.pipe(res);
+    res.on("finish", () => {
+      stream.destroy();
+      activeStreams--;
+      console.log("Finalizado | Ativos:", activeStreams);
+    });
+
+    stream.pipe(res);
 
   } catch (err) {
-    console.error("ERRO PLAY:", err.message);
-    res.status(500).send("Erro ao reproduzir stream");
+    activeStreams--;
+    console.log("ERRO PLAY:", err.message);
+    res.status(500).send("Erro no stream");
   }
 });
 
 
-// ================= IMG =================
-app.get("/img", async (req, res) => {
-  try {
-    const r = await fetch(req.query.url, { headers: standardHeaders });
-    res.set("Content-Type", r.headers.get("content-type"));
-    r.body.pipe(res);
-  } catch {
-    res.status(500).send("Erro ao reproduzir");
-    res.status(500).send("Erro imagem");
-  }
+// ================= START =================
+app.listen(PORT, "0.0.0.0", () => {
+  console.log("Servidor rodando na porta", PORT);
 });
