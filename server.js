@@ -1,23 +1,20 @@
 const express = require("express");
+const fetch = require("node-fetch");
 const cors = require("cors");
-const { Readable } = require("stream");
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// 🔥 HEADERS ANTI-BLOQUEIO (ESSENCIAL)
+// Headers OTIMIZADOS (evita 403)
 const standardHeaders = {
-  "User-Agent": "Mozilla/5.0 (Linux; Android 10; SM-G973F) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36",
+  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
   "Accept": "*/*",
-  "Accept-Language": "en-US,en;q=0.9",
-  "Referer": "http://aptxu.com/",
-  "Origin": "http://aptxu.com",
   "Connection": "keep-alive"
 };
 
 app.get("/", (req, res) => {
-  res.send("Backend IPTV v11.0 (ANTI-403 + NGROK FIX) 🚀");
+  res.send("Backend IPTV v5.1 (EPG Smart + Anti-403) 🚀");
 });
 
 
@@ -25,38 +22,15 @@ app.get("/", (req, res) => {
 app.post("/login", async (req, res) => {
   try {
     const { dns, username, password, action } = req.body;
-
     const act = action || "get_live_streams";
 
     const url = `${dns}/player_api.php?username=${username}&password=${password}&action=${act}`;
 
-    console.log("LOGIN:", url);
-
     const response = await fetch(url, {
-      headers: standardHeaders
+      headers: standardHeaders,
+      timeout: 30000,
+      size: 0
     });
-
-    // 🔥 TENTA NOVAMENTE COM OUTRO USER-AGENT (fallback)
-    if (response.status === 403) {
-      console.log("Tentando bypass 403...");
-
-      const altHeaders = {
-        ...standardHeaders,
-        "User-Agent": "VLC/3.0.0 LibVLC"
-      };
-
-      const retry = await fetch(url, { headers: altHeaders });
-
-      if (!retry.ok) {
-        return res.status(403).json({
-          error: "IPTV bloqueou (403)",
-          dica: "Servidor bloqueando IP (ngrok/local)"
-        });
-      }
-
-      const data = await retry.json();
-      return res.json(data);
-    }
 
     if (!response.ok) {
       return res.status(response.status).json({
@@ -87,7 +61,10 @@ app.post("/info", async (req, res) => {
 
     const url = `${dns}/player_api.php?username=${username}&password=${password}&action=${actionType}&${idParam}=${id}`;
 
-    const response = await fetch(url, { headers: standardHeaders });
+    const response = await fetch(url, {
+      headers: standardHeaders,
+      timeout: 10000
+    });
 
     const data = await response.json();
     res.json(data);
@@ -98,23 +75,77 @@ app.post("/info", async (req, res) => {
 });
 
 
-// ================= IMG (FIX NODE 18+) =================
-app.get("/img", async (req, res) => {
+// ================= EPG (SMART + FALLBACK) =================
+app.post("/epg", async (req, res) => {
   try {
-    const url = decodeURIComponent(req.query.url);
+    const { dns, username, password, stream_id } = req.body;
 
-    const response = await fetch(url);
+    if (!dns || !username || !password || !stream_id) {
+      return res.status(400).json({
+        error: "Preencha dns, username, password e stream_id"
+      });
+    }
 
-    res.set("Content-Type", response.headers.get("content-type") || "image/jpeg");
+    // 1️⃣ tenta EPG curto
+    let url = `${dns}/player_api.php?username=${username}&password=${password}&action=get_short_epg&stream_id=${stream_id}`;
+    
+    let response = await fetch(url, {
+      headers: standardHeaders,
+      timeout: 15000
+    });
 
-    const stream = Readable.fromWeb(response.body);
-    stream.pipe(res);
+    let data = await response.json();
+
+    // 2️⃣ fallback se vier vazio
+    if (!data.epg_listings || data.epg_listings.length === 0) {
+      url = `${dns}/player_api.php?username=${username}&password=${password}&action=get_simple_data_table&stream_id=${stream_id}`;
+      
+      response = await fetch(url, {
+        headers: standardHeaders,
+        timeout: 15000
+      });
+
+      data = await response.json();
+    }
+
+    // decode base64
+    let epg = [];
+
+    if (data.epg_listings) {
+      epg = data.epg_listings.map(item => ({
+        title: item.title
+          ? Buffer.from(item.title, "base64").toString("utf-8")
+          : "",
+        description: item.description
+          ? Buffer.from(item.description, "base64").toString("utf-8")
+          : "",
+        start: item.start,
+        end: item.end
+      }));
+    }
+
+    res.json({
+      total: epg.length,
+      epg
+    });
 
   } catch (err) {
     res.status(500).json({
-      error: "Erro ao carregar imagem",
+      error: "Erro no EPG",
       detalhe: err.message
     });
+  }
+});
+
+
+// ================= IMG =================
+app.get("/img", async (req, res) => {
+  try {
+    const r = await fetch(req.query.url, { headers: standardHeaders });
+    res.set("Content-Type", r.headers.get("content-type"));
+    r.body.pipe(res);
+  } catch {
+    res.status(500).send("Erro imagem");
   }
 });
 
@@ -125,40 +156,37 @@ app.get("/play", async (req, res) => {
     const streamUrl = req.query.url;
     const range = req.headers.range;
 
-    const response = await fetch(streamUrl, {
+    const fetchOptions = {
       headers: {
         ...standardHeaders,
         ...(range && { Range: range })
-      }
-    });
+      },
+      compress: false
+    };
 
-    res.set("Content-Type", response.headers.get("content-type") || "video/mp4");
+    const r = await fetch(streamUrl, fetchOptions);
+
+    res.set("Content-Type", r.headers.get("content-type") || "video/mp4");
     res.set("Accept-Ranges", "bytes");
 
-    if (response.headers.get("content-range")) {
-      res.set("Content-Range", response.headers.get("content-range"));
+    if (r.headers.get("content-range")) {
+      res.set("Content-Range", r.headers.get("content-range"));
     }
 
-    if (response.headers.get("content-length")) {
-      res.set("Content-Length", response.headers.get("content-length"));
+    if (r.headers.get("content-length")) {
+      res.set("Content-Length", r.headers.get("content-length"));
     }
 
-    res.status(response.status);
+    res.status(r.status);
+    r.body.pipe(res);
 
-    const stream = Readable.fromWeb(response.body);
-    stream.pipe(res);
-
-  } catch (err) {
-    res.status(500).json({
-      error: "Erro ao reproduzir",
-      detalhe: err.message
-    });
+  } catch {
+    res.status(500).send("Erro ao reproduzir");
   }
 });
 
 
 const PORT = process.env.PORT || 8080;
-
 app.listen(PORT, "0.0.0.0", () => {
   console.log("Servidor rodando na porta " + PORT);
 });
