@@ -1,18 +1,12 @@
 const express = require("express");
 const cors = require("cors");
 const { Readable } = require("stream");
-const https = require("https");
-const http = require("http");
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// agentes keep-alive (melhora conexão)
-const httpAgent = new http.Agent({ keepAlive: true });
-const httpsAgent = new https.Agent({ keepAlive: true });
-
-// HEADERS mais “reais”
+// HEADERS DINÂMICOS (melhor compatibilidade)
 const buildHeaders = (dns) => ({
   "User-Agent": "IPTV Smarters Pro",
   "Accept": "*/*",
@@ -23,7 +17,7 @@ const buildHeaders = (dns) => ({
 });
 
 app.get("/", (req, res) => {
-  res.send("Backend IPTV v20 (ANTI-403 + IOS + DEBUG) 🚀");
+  res.send("Backend IPTV v13 (SIMPLE FIX) 🚀");
 });
 
 
@@ -44,8 +38,7 @@ app.post("/login", async (req, res) => {
 
     const response = await fetch(url, {
       headers: buildHeaders(dns),
-      redirect: "follow",
-      agent: url.startsWith("https") ? httpsAgent : httpAgent
+      redirect: "follow"
     });
 
     const text = await response.text();
@@ -54,16 +47,12 @@ app.post("/login", async (req, res) => {
       return res.status(response.status).json({
         error: "Servidor IPTV recusou",
         status_origem: response.status,
-        resposta: text // 👈 ESSENCIAL PRA DEBUG
+        resposta: text // 👈 agora você vê o erro real
       });
     }
 
-    try {
-      const data = JSON.parse(text);
-      res.json(data);
-    } catch {
-      res.send(text);
-    }
+    const data = JSON.parse(text);
+    res.json(data);
 
   } catch (err) {
     res.status(500).json({
@@ -85,10 +74,7 @@ app.get("/img", async (req, res) => {
       }
     });
 
-    res.set(
-      "Content-Type",
-      response.headers.get("content-type") || "image/jpeg"
-    );
+    res.set("Content-Type", response.headers.get("content-type") || "image/jpeg");
 
     const stream = Readable.fromWeb(response.body);
     stream.pipe(res);
@@ -102,7 +88,7 @@ app.get("/img", async (req, res) => {
 });
 
 
-// ================= PLAYER (IOS + HLS FIX) =================
+// ================= PLAYER (IOS FIX) =================
 app.get("/play", async (req, res) => {
   try {
     const streamUrl = req.query.url;
@@ -119,11 +105,9 @@ app.get("/play", async (req, res) => {
         "Connection": "keep-alive",
         ...(range ? { Range: range } : {})
       },
-      redirect: "follow",
-      agent: streamUrl.startsWith("https") ? httpsAgent : httpAgent
+      redirect: "follow"
     });
 
-    // HEADERS importantes pra iOS
     res.set("Content-Type", response.headers.get("content-type") || "application/vnd.apple.mpegurl");
     res.set("Accept-Ranges", "bytes");
 
@@ -134,7 +118,6 @@ app.get("/play", async (req, res) => {
       res.status(200);
     }
 
-    // evitar buffering travado no Safari
     res.set("Cache-Control", "no-cache");
 
     const stream = Readable.fromWeb(response.body);
