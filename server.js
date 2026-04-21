@@ -1,20 +1,29 @@
 const express = require("express");
 const cors = require("cors");
 const { Readable } = require("stream");
+const https = require("https");
+const http = require("http");
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// HEADERS
-const standardHeaders = {
-  "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.0 Mobile Safari/604.1",
+// agentes keep-alive (melhora conexão)
+const httpAgent = new http.Agent({ keepAlive: true });
+const httpsAgent = new https.Agent({ keepAlive: true });
+
+// HEADERS mais “reais”
+const buildHeaders = (dns) => ({
+  "User-Agent": "IPTV Smarters Pro",
   "Accept": "*/*",
-  "Connection": "keep-alive"
-};
+  "Connection": "keep-alive",
+  "Referer": dns,
+  "Origin": dns,
+  "X-Requested-With": "XMLHttpRequest"
+});
 
 app.get("/", (req, res) => {
-  res.send("Backend IPTV v12 (NO WARNING + IOS FIX) 🚀");
+  res.send("Backend IPTV v20 (ANTI-403 + IOS + DEBUG) 🚀");
 });
 
 
@@ -22,23 +31,39 @@ app.get("/", (req, res) => {
 app.post("/login", async (req, res) => {
   try {
     const { dns, username, password, action } = req.body;
+
+    if (!dns || !username || !password) {
+      return res.status(400).json({
+        error: "Preencha DNS, usuário e senha"
+      });
+    }
+
     const act = action || "get_live_streams";
 
     const url = `${dns}/player_api.php?username=${username}&password=${password}&action=${act}`;
 
     const response = await fetch(url, {
-      headers: standardHeaders
+      headers: buildHeaders(dns),
+      redirect: "follow",
+      agent: url.startsWith("https") ? httpsAgent : httpAgent
     });
+
+    const text = await response.text();
 
     if (!response.ok) {
       return res.status(response.status).json({
         error: "Servidor IPTV recusou",
-        status_origem: response.status
+        status_origem: response.status,
+        resposta: text // 👈 ESSENCIAL PRA DEBUG
       });
     }
 
-    const data = await response.json();
-    res.json(data);
+    try {
+      const data = JSON.parse(text);
+      res.json(data);
+    } catch {
+      res.send(text);
+    }
 
   } catch (err) {
     res.status(500).json({
@@ -54,9 +79,16 @@ app.get("/img", async (req, res) => {
   try {
     const url = decodeURIComponent(req.query.url);
 
-    const response = await fetch(url);
+    const response = await fetch(url, {
+      headers: {
+        "User-Agent": "Mozilla/5.0"
+      }
+    });
 
-    res.set("Content-Type", response.headers.get("content-type") || "image/jpeg");
+    res.set(
+      "Content-Type",
+      response.headers.get("content-type") || "image/jpeg"
+    );
 
     const stream = Readable.fromWeb(response.body);
     stream.pipe(res);
@@ -70,20 +102,29 @@ app.get("/img", async (req, res) => {
 });
 
 
-// ================= PLAYER (IOS FIX) =================
+// ================= PLAYER (IOS + HLS FIX) =================
 app.get("/play", async (req, res) => {
   try {
     const streamUrl = req.query.url;
     const range = req.headers.range;
 
+    if (!streamUrl) {
+      return res.status(400).json({ error: "URL não informada" });
+    }
+
     const response = await fetch(streamUrl, {
       headers: {
-        ...standardHeaders,
+        "User-Agent": "VLC/3.0.18",
+        "Accept": "*/*",
+        "Connection": "keep-alive",
         ...(range ? { Range: range } : {})
-      }
+      },
+      redirect: "follow",
+      agent: streamUrl.startsWith("https") ? httpsAgent : httpAgent
     });
 
-    res.set("Content-Type", response.headers.get("content-type") || "video/mp2t");
+    // HEADERS importantes pra iOS
+    res.set("Content-Type", response.headers.get("content-type") || "application/vnd.apple.mpegurl");
     res.set("Accept-Ranges", "bytes");
 
     if (response.headers.get("content-range")) {
@@ -92,6 +133,9 @@ app.get("/play", async (req, res) => {
     } else {
       res.status(200);
     }
+
+    // evitar buffering travado no Safari
+    res.set("Cache-Control", "no-cache");
 
     const stream = Readable.fromWeb(response.body);
     stream.pipe(res);
