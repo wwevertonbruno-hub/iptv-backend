@@ -5,36 +5,25 @@ const { Readable } = require("stream");
 const app = express();
 
 app.use(cors());
-
-app.use(express.json({
-    limit: "10mb"
-}));
-
-
-// ================= CONFIG =================
+app.use(express.json({ limit: "10mb" }));
 
 const PORT = process.env.PORT || 8080;
-
-const REQUEST_TIMEOUT = 60000;
 
 
 // ================= HEADERS =================
 
-function createHeaders(dns = "") {
+function createHeaders(dns) {
 
     return {
 
         "User-Agent":
-        "Mozilla/5.0 (Linux; Android 11) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
 
         "Accept":
         "*/*",
 
         "Connection":
         "keep-alive",
-
-        "Cache-Control":
-        "no-cache",
 
         ...(dns ? {
             "Referer": dns
@@ -45,39 +34,34 @@ function createHeaders(dns = "") {
 }
 
 
-
 // ================= FETCH =================
 
-async function requestWithTimeout(url, options={}) {
-
+async function fetchTimeout(url, options={}) {
 
     const controller = new AbortController();
-
 
     const timer = setTimeout(()=>{
 
         controller.abort();
 
-    }, REQUEST_TIMEOUT);
+    },60000);
 
 
-
-    try {
+    try{
 
         return await fetch(url,{
             ...options,
-            signal: controller.signal
+            signal:controller.signal
         });
 
 
-    } finally {
+    }finally{
 
         clearTimeout(timer);
 
     }
 
 }
-
 
 
 
@@ -92,7 +76,7 @@ app.get("/",(req,res)=>{
 
         service:"IPTV Backend",
 
-        version:"v25",
+        version:"v26",
 
         time:new Date()
 
@@ -103,11 +87,10 @@ app.get("/",(req,res)=>{
 
 
 
-
 // ================= LOGIN =================
 
 
-app.post("/login", async(req,res)=>{
+app.post("/login",async(req,res)=>{
 
 
 try{
@@ -121,7 +104,9 @@ username,
 
 password,
 
-action="get_live_streams"
+action="get_live_streams",
+
+series_id
 
 }=req.body;
 
@@ -131,7 +116,7 @@ if(!dns || !username || !password){
 
 return res.status(400).json({
 
-error:"Informe dns, username e password"
+error:"Dados incompletos"
 
 });
 
@@ -165,12 +150,25 @@ action
 
 
 
-console.log("[LOGIN]", api.toString());
+if(series_id){
+
+api.searchParams.set(
+"series_id",
+series_id
+);
+
+}
 
 
 
-const response =
-await requestWithTimeout(
+console.log(
+"[LOGIN]",
+api.toString()
+);
+
+
+
+const response = await fetchTimeout(
 
 api,
 
@@ -189,18 +187,121 @@ await response.text();
 
 
 
-console.log("[LOGIN RESPONSE]",{
+console.log(
+
+"[LOGIN RESPONSE]",
+
+{
 
 status:response.status,
 
 server:
-response.headers.get("server")
+response.headers.get("server"),
 
-});
+size:
+body.length
+
+}
+
+);
 
 
 
-res.status(response.status).json(
+
+
+// ================= DEBUG SERIES =================
+
+
+if(action === "get_series_info"){
+
+
+console.log(
+"[SERIES DEBUG] tamanho:",
+body.length
+);
+
+
+try{
+
+
+const json = JSON.parse(body);
+
+
+
+console.log(
+
+"[SERIES DEBUG] chaves:",
+
+Object.keys(json)
+
+);
+
+
+
+console.log(
+
+"[SERIES DEBUG] episodes:",
+
+json.episodes
+? "EXISTE"
+: "NÃO EXISTE"
+
+);
+
+
+
+if(json.episodes){
+
+
+console.log(
+
+"[SERIES DEBUG] temporadas:",
+
+Object.keys(json.episodes)
+
+);
+
+
+
+console.log(
+
+"[SERIES DEBUG] primeiro episodio:",
+
+json.episodes[
+Object.keys(json.episodes)[0]
+]?.[0]
+
+);
+
+
+}
+
+
+
+}catch(e){
+
+
+console.log(
+
+"[SERIES DEBUG ERROR]",
+
+e.message
+
+);
+
+
+}
+
+
+}
+
+
+
+
+
+res
+.status(response.status)
+.json(
 JSON.parse(body)
 );
 
@@ -209,7 +310,11 @@ JSON.parse(body)
 }catch(error){
 
 
-console.log("[LOGIN ERROR]",error);
+console.log(
+"[LOGIN ERROR]",
+error.message
+);
+
 
 
 res.status(500).json({
@@ -229,11 +334,10 @@ error:error.message
 
 
 
-
 // ================= HLS REWRITE =================
 
 
-function rewriteM3U8(content, baseUrl){
+function rewriteM3U8(content,base){
 
 
 return content
@@ -241,48 +345,38 @@ return content
 .map(line=>{
 
 
-    line=line.trim();
+if(!line || line.startsWith("#")){
 
+return line;
 
-    if(!line){
-
-        return line;
-
-    }
+}
 
 
 
-    // comentários do m3u8
-
-    if(line.startsWith("#")){
-
-        return line;
-
-    }
+let url;
 
 
+try{
 
-    // URL absoluta ou relativa
 
-    let segmentUrl;
+url = new URL(
+line,
+base
+).href;
 
 
 
-    if(line.startsWith("http")){
-
-        segmentUrl=line;
-
-    }else{
+}catch{
 
 
-        segmentUrl =
-        new URL(line, baseUrl).href;
+url=line;
 
-    }
+
+}
 
 
 
-    return `/stream-proxy?url=${encodeURIComponent(segmentUrl)}`;
+return `/stream-proxy?url=${encodeURIComponent(url)}`;
 
 
 })
@@ -296,7 +390,7 @@ return content
 
 
 
-// ================= STREAM PROXY =================
+// ================= STREAM =================
 
 
 async function streamProxy(req,res){
@@ -317,7 +411,7 @@ if(!url){
 
 return res.status(400).json({
 
-error:"URL não informada"
+error:"URL ausente"
 
 });
 
@@ -325,9 +419,20 @@ error:"URL não informada"
 
 
 
-console.log("[STREAM]",url);
+console.log(
+"[STREAM]",
+url
+);
 
-console.log("[RANGE]",req.headers.range || "none");
+
+
+console.log(
+
+"[RANGE]",
+
+req.headers.range || "none"
+
+);
 
 
 
@@ -335,15 +440,13 @@ const headers={
 
 
 "User-Agent":
-"Mozilla/5.0 (Linux; Android 11) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36",
+
+"Mozilla/5.0 Chrome/120",
 
 
 "Accept":
-"*/*",
 
-
-"Connection":
-"keep-alive"
+"*/*"
 
 };
 
@@ -358,36 +461,47 @@ headers.Range=req.headers.range;
 
 
 
-const response =
-await fetch(url,{
+const response = await fetch(
 
-headers,
+url,
 
-redirect:"follow"
+{
 
-});
+headers
 
+}
 
-
-
-const contentType =
-response.headers.get("content-type") || "";
+);
 
 
 
-console.log("[STREAM RESPONSE]",{
+const type =
+response.headers.get(
+"content-type"
+)
+|| "";
+
+
+
+console.log(
+
+"[STREAM RESPONSE]",
+
+{
 
 status:response.status,
 
-type:contentType
+type
 
-});
+}
+
+);
 
 
 
 
 
-// ===== HLS =====
+// HLS
 
 
 if(
@@ -396,7 +510,7 @@ url.includes(".m3u8")
 
 ||
 
-contentType.includes("mpegurl")
+type.includes("mpegurl")
 
 ){
 
@@ -407,7 +521,7 @@ await response.text();
 
 
 
-const rewritten =
+const playlist =
 rewriteM3U8(
 text,
 url
@@ -416,28 +530,28 @@ url
 
 
 res.setHeader(
+
 "Content-Type",
+
 "application/x-mpegurl"
+
 );
 
 
 
 res.setHeader(
+
 "Access-Control-Allow-Origin",
+
 "*"
+
 );
 
 
 
-res.setHeader(
-"Cache-Control",
-"no-cache"
+return res.send(
+playlist
 );
-
-
-
-return res.send(rewritten);
-
 
 
 }
@@ -446,32 +560,18 @@ return res.send(rewritten);
 
 
 
-
-
-// ===== MP4 / TS =====
+// MP4 / TS
 
 
 res.status(response.status);
 
 
-
 res.setHeader(
+
 "Access-Control-Allow-Origin",
+
 "*"
-);
 
-
-
-res.setHeader(
-"Cache-Control",
-"no-cache"
-);
-
-
-
-res.setHeader(
-"Accept-Ranges",
-"bytes"
 );
 
 
@@ -481,17 +581,17 @@ res.setHeader(
 "content-length",
 "content-range"
 ]
-.forEach(header=>{
+.forEach(h=>{
 
 
 const value =
-response.headers.get(header);
+response.headers.get(h);
 
 
 if(value){
 
 res.setHeader(
-header,
+h,
 value
 );
 
@@ -499,8 +599,6 @@ value
 
 
 });
-
-
 
 
 
@@ -514,7 +612,9 @@ response.body
 
 }else{
 
+
 res.end();
+
 
 }
 
@@ -523,15 +623,19 @@ res.end();
 }catch(error){
 
 
-console.log("[STREAM ERROR]",error);
+console.log(
+
+"[STREAM ERROR]",
+
+error.message
+
+);
 
 
 
 res.status(500).json({
 
-error:"Erro no stream",
-
-detail:error.message
+error:error.message
 
 });
 
@@ -544,20 +648,19 @@ detail:error.message
 
 
 
-// ================= ROUTES =================
+app.get(
+"/play",
+streamProxy
+);
 
 
-app.get("/play",streamProxy);
-
-
-app.get("/stream-proxy",streamProxy);
-
-
-
+app.get(
+"/stream-proxy",
+streamProxy
+);
 
 
 
-// ================= START =================
 
 
 app.listen(
@@ -569,7 +672,9 @@ PORT,
 ()=>{
 
 console.log(
+
 `Servidor online porta ${PORT}`
+
 );
 
 }
