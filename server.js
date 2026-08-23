@@ -5,17 +5,21 @@ const { Readable } = require("stream");
 const app = express();
 
 app.use(cors());
-app.use(express.json({ limit: "10mb" }));
+
+app.use(express.json({
+    limit: "10mb"
+}));
 
 
 // ================= CONFIG =================
 
 const PORT = process.env.PORT || 8080;
 
-const REQUEST_TIMEOUT = 20000;
+const REQUEST_TIMEOUT = 60000;
 
 
-// ================= HEADERS =================
+
+// ================= HEADERS IPTV =================
 
 function createHeaders(dns = "") {
 
@@ -25,20 +29,19 @@ function createHeaders(dns = "") {
         "Mozilla/5.0 (Linux; Android 11) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36",
 
         "Accept":
-        "application/json,text/plain,*/*",
+        "*/*",
 
         "Accept-Language":
         "pt-BR,pt;q=0.9",
 
-        "Cache-Control":
-        "no-cache",
-
         "Connection":
         "keep-alive",
 
+        "Cache-Control":
+        "no-cache",
+
         ...(dns ? {
-            "Referer": dns,
-            "Origin": dns
+            "Referer": dns
         } : {})
 
     };
@@ -49,13 +52,13 @@ function createHeaders(dns = "") {
 
 // ================= FETCH TIMEOUT =================
 
-async function requestWithTimeout(url, options = {}) {
+async function requestWithTimeout(url, options={}) {
 
 
     const controller = new AbortController();
 
 
-    const timer = setTimeout(() => {
+    const timer = setTimeout(()=>{
 
         controller.abort();
 
@@ -64,6 +67,7 @@ async function requestWithTimeout(url, options = {}) {
 
 
     try {
+
 
         return await fetch(url, {
 
@@ -80,15 +84,16 @@ async function requestWithTimeout(url, options = {}) {
 
     }
 
+
 }
 
 
 
 
-// ================= HEALTH =================
+// ================= HOME =================
 
 
-app.get("/", (req,res)=>{
+app.get("/",(req,res)=>{
 
 
     res.json({
@@ -97,7 +102,7 @@ app.get("/", (req,res)=>{
 
         service:"IPTV Backend",
 
-        version:"v23",
+        version:"v24",
 
         time:new Date()
 
@@ -135,13 +140,11 @@ action="get_live_streams"
 
 if(!dns || !username || !password){
 
-
 return res.status(400).json({
 
 error:"Informe dns, username e password"
 
 });
-
 
 }
 
@@ -177,7 +180,8 @@ console.log("[LOGIN]", api.toString());
 
 
 
-const response = await requestWithTimeout(
+const response =
+await requestWithTimeout(
 
 api,
 
@@ -185,9 +189,7 @@ api,
 
 method:"GET",
 
-headers:createHeaders(dns),
-
-redirect:"follow"
+headers:createHeaders(dns)
 
 }
 
@@ -195,57 +197,25 @@ redirect:"follow"
 
 
 
-const body = await response.text();
+const body =
+await response.text();
 
 
 
-console.log("[LOGIN RESPONSE]", {
+console.log("[LOGIN RESPONSE]",{
 
-status: response.status,
+status:response.status,
 
-server: response.headers.get("server")
-
-});
-
-
-
-if(!response.ok){
-
-
-return res.status(response.status).json({
-
-error:"Servidor externo recusou",
-
-status_origem:response.status,
-
-resposta:body.substring(0,300)
+server:
+response.headers.get("server")
 
 });
 
 
-}
 
-
-
-try{
-
-
-return res.json(JSON.parse(body));
-
-
-}catch{
-
-
-return res.status(500).json({
-
-error:"Resposta inválida",
-
-resposta:body.substring(0,300)
-
-});
-
-
-}
+return res.status(response.status).json(
+JSON.parse(body)
+);
 
 
 
@@ -257,9 +227,7 @@ console.log("[LOGIN ERROR]",error);
 
 res.status(500).json({
 
-error:"Falha no backend",
-
-detalhe:error.message
+error:error.message
 
 });
 
@@ -267,7 +235,6 @@ detalhe:error.message
 }
 
 
-
 });
 
 
@@ -275,34 +242,39 @@ detalhe:error.message
 
 
 
-// ================= STREAM HANDLER =================
+
+// ================= STREAM PROXY =================
 
 
-async function proxyStream(req,res){
+async function streamProxy(req,res){
 
 
 try{
 
 
-const { url } = req.query;
+const {
+
+url
+
+}=req.query;
 
 
 
 if(!url){
 
-
 return res.status(400).json({
 
-error:"URL do stream não informada"
+error:"URL não informada"
 
 });
-
 
 }
 
 
 
-console.log("[STREAM]", url);
+console.log("[STREAM]",url);
+
+console.log("[RANGE]",req.headers.range || "none");
 
 
 
@@ -323,12 +295,11 @@ const headers = {
 
 "keep-alive"
 
-
 };
 
 
 
-// importante para players
+// repassa range do player
 
 if(req.headers.range){
 
@@ -338,9 +309,7 @@ headers.Range = req.headers.range;
 
 
 
-
 const response = await fetch(url,{
-
 
 method:"GET",
 
@@ -348,18 +317,15 @@ headers,
 
 redirect:"follow"
 
-
 });
-
 
 
 
 console.log("[STREAM RESPONSE]",{
 
-
 status:response.status,
 
-contentType:
+type:
 response.headers.get("content-type")
 
 });
@@ -367,19 +333,41 @@ response.headers.get("content-type")
 
 
 
+
+// headers importantes para vídeo
+
 res.status(response.status);
+
+
+
+res.setHeader(
+"Access-Control-Allow-Origin",
+"*"
+);
+
+
+res.setHeader(
+"Cache-Control",
+"no-cache"
+);
+
+
+res.setHeader(
+"Accept-Ranges",
+"bytes"
+);
 
 
 
 [
 "content-type",
 "content-length",
-"content-range",
-"accept-ranges"
+"content-range"
 ].forEach(header=>{
 
 
-const value = response.headers.get(header);
+const value =
+response.headers.get(header);
 
 
 if(value){
@@ -403,15 +391,9 @@ return res.end();
 
 
 
-
-
-const stream = Readable.fromWeb(
+Readable.fromWeb(
 response.body
-);
-
-
-
-stream.pipe(res);
+).pipe(res);
 
 
 
@@ -421,12 +403,11 @@ stream.pipe(res);
 console.log("[STREAM ERROR]",error);
 
 
-
 res.status(500).json({
 
-error:"Erro no proxy",
+error:"Erro no stream",
 
-detalhe:error.message
+detail:error.message
 
 });
 
@@ -439,20 +420,13 @@ detalhe:error.message
 
 
 
+// ================= ROTAS DE VIDEO =================
 
 
-// ================= PLAY =================
+app.get("/play",streamProxy);
 
 
-app.get("/play", proxyStream);
-
-
-
-
-// ================= STREAM PROXY (LOVABLE) =================
-
-
-app.get("/stream-proxy", proxyStream);
+app.get("/stream-proxy",streamProxy);
 
 
 
