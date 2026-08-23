@@ -1,5 +1,6 @@
 const express = require("express");
 const cors = require("cors");
+const { Readable } = require("stream");
 
 const app = express();
 
@@ -21,7 +22,7 @@ function createHeaders(){
     return {
 
         "User-Agent":
-        "Dalvik/2.1.0 (Linux; Android 11)",
+        "Mozilla/5.0 (Linux; Android 11) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36",
 
         "Accept":
         "application/json,text/plain,*/*",
@@ -33,17 +34,12 @@ function createHeaders(){
         "no-cache",
 
         "Connection":
-        "keep-alive",
-
-        "Accept-Encoding":
-        "gzip, deflate",
-
-        "DNT":
-        "1"
+        "keep-alive"
 
     };
 
 }
+
 
 
 // ================= FETCH CONTROL =================
@@ -69,8 +65,7 @@ async function requestWithTimeout(url, options={}){
 
             ...options,
 
-            signal:
-            controller.signal
+            signal: controller.signal
 
         });
 
@@ -78,7 +73,7 @@ async function requestWithTimeout(url, options={}){
         return response;
 
 
-    }finally{
+    } finally {
 
         clearTimeout(timer);
 
@@ -99,13 +94,14 @@ app.get("/",(req,res)=>{
 
         service:"IPTV Backend",
 
-        version:"v21",
+        version:"v22",
 
         time:new Date()
 
     });
 
 });
+
 
 
 
@@ -165,10 +161,7 @@ action
 
 
 
-console.log(
-"[LOGIN]",
-api.toString()
-);
+console.log("[LOGIN]", api.toString());
 
 
 
@@ -181,8 +174,7 @@ api,
 
 method:"GET",
 
-headers:
-createHeaders(),
+headers:createHeaders(),
 
 redirect:"follow"
 
@@ -227,11 +219,9 @@ return res.status(response.status).json({
 
 error:"Servidor externo recusou",
 
-status_origem:
-response.status,
+status_origem:response.status,
 
-servidor:
-server,
+servidor:server,
 
 cloudflare,
 
@@ -292,6 +282,151 @@ detalhe:error.message
 
 
 });
+
+
+
+
+// ================= PLAY PROXY =================
+
+
+app.get("/play", async (req,res)=>{
+
+
+try{
+
+
+const { url } = req.query;
+
+
+
+if(!url){
+
+return res.status(400).json({
+
+error:"URL do stream não informada"
+
+});
+
+}
+
+
+
+console.log("[PLAY]", url);
+
+
+
+const headers = {
+
+"User-Agent":
+"Mozilla/5.0 (Linux; Android 11) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36",
+
+"Accept":
+"*/*",
+
+"Connection":
+"keep-alive"
+
+};
+
+
+
+// suporta pausa/carregamento do player
+
+if(req.headers.range){
+
+headers.Range = req.headers.range;
+
+}
+
+
+
+const response = await fetch(url,{
+
+method:"GET",
+
+headers,
+
+redirect:"follow"
+
+});
+
+
+
+console.log("[PLAY RESPONSE]",{
+
+status:response.status,
+
+type:
+response.headers.get("content-type")
+
+});
+
+
+
+res.status(response.status);
+
+
+
+[
+"content-type",
+"content-length",
+"content-range",
+"accept-ranges"
+].forEach(header=>{
+
+
+const value =
+response.headers.get(header);
+
+
+if(value){
+
+res.setHeader(header,value);
+
+}
+
+
+});
+
+
+
+if(!response.body){
+
+return res.end();
+
+}
+
+
+
+const stream =
+Readable.fromWeb(response.body);
+
+
+stream.pipe(res);
+
+
+
+}catch(error){
+
+
+console.log("[PLAY ERROR]",error);
+
+
+
+res.status(500).json({
+
+error:"Falha no proxy de reprodução",
+
+detalhe:error.message
+
+});
+
+
+}
+
+
+});
+
 
 
 
