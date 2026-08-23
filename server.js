@@ -18,8 +18,7 @@ const PORT = process.env.PORT || 8080;
 const REQUEST_TIMEOUT = 60000;
 
 
-
-// ================= HEADERS IPTV =================
+// ================= HEADERS =================
 
 function createHeaders(dns = "") {
 
@@ -30,9 +29,6 @@ function createHeaders(dns = "") {
 
         "Accept":
         "*/*",
-
-        "Accept-Language":
-        "pt-BR,pt;q=0.9",
 
         "Connection":
         "keep-alive",
@@ -50,7 +46,7 @@ function createHeaders(dns = "") {
 
 
 
-// ================= FETCH TIMEOUT =================
+// ================= FETCH =================
 
 async function requestWithTimeout(url, options={}) {
 
@@ -68,13 +64,9 @@ async function requestWithTimeout(url, options={}) {
 
     try {
 
-
-        return await fetch(url, {
-
+        return await fetch(url,{
             ...options,
-
             signal: controller.signal
-
         });
 
 
@@ -83,7 +75,6 @@ async function requestWithTimeout(url, options={}) {
         clearTimeout(timer);
 
     }
-
 
 }
 
@@ -95,19 +86,17 @@ async function requestWithTimeout(url, options={}) {
 
 app.get("/",(req,res)=>{
 
-
     res.json({
 
         status:"online",
 
         service:"IPTV Backend",
 
-        version:"v24",
+        version:"v25",
 
         time:new Date()
 
     });
-
 
 });
 
@@ -187,8 +176,6 @@ api,
 
 {
 
-method:"GET",
-
 headers:createHeaders(dns)
 
 }
@@ -213,7 +200,7 @@ response.headers.get("server")
 
 
 
-return res.status(response.status).json(
+res.status(response.status).json(
 JSON.parse(body)
 );
 
@@ -237,6 +224,72 @@ error:error.message
 
 });
 
+
+
+
+
+
+
+// ================= HLS REWRITE =================
+
+
+function rewriteM3U8(content, baseUrl){
+
+
+return content
+.split("\n")
+.map(line=>{
+
+
+    line=line.trim();
+
+
+    if(!line){
+
+        return line;
+
+    }
+
+
+
+    // comentários do m3u8
+
+    if(line.startsWith("#")){
+
+        return line;
+
+    }
+
+
+
+    // URL absoluta ou relativa
+
+    let segmentUrl;
+
+
+
+    if(line.startsWith("http")){
+
+        segmentUrl=line;
+
+    }else{
+
+
+        segmentUrl =
+        new URL(line, baseUrl).href;
+
+    }
+
+
+
+    return `/stream-proxy?url=${encodeURIComponent(segmentUrl)}`;
+
+
+})
+.join("\n");
+
+
+}
 
 
 
@@ -278,40 +331,35 @@ console.log("[RANGE]",req.headers.range || "none");
 
 
 
-const headers = {
+const headers={
 
 
 "User-Agent":
-
 "Mozilla/5.0 (Linux; Android 11) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36",
 
 
 "Accept":
-
 "*/*",
 
 
 "Connection":
-
 "keep-alive"
 
 };
 
 
 
-// repassa range do player
-
 if(req.headers.range){
 
-headers.Range = req.headers.range;
+headers.Range=req.headers.range;
 
 }
 
 
 
-const response = await fetch(url,{
 
-method:"GET",
+const response =
+await fetch(url,{
 
 headers,
 
@@ -321,12 +369,17 @@ redirect:"follow"
 
 
 
+
+const contentType =
+response.headers.get("content-type") || "";
+
+
+
 console.log("[STREAM RESPONSE]",{
 
 status:response.status,
 
-type:
-response.headers.get("content-type")
+type:contentType
 
 });
 
@@ -334,7 +387,69 @@ response.headers.get("content-type")
 
 
 
-// headers importantes para vídeo
+// ===== HLS =====
+
+
+if(
+
+url.includes(".m3u8")
+
+||
+
+contentType.includes("mpegurl")
+
+){
+
+
+
+const text =
+await response.text();
+
+
+
+const rewritten =
+rewriteM3U8(
+text,
+url
+);
+
+
+
+res.setHeader(
+"Content-Type",
+"application/x-mpegurl"
+);
+
+
+
+res.setHeader(
+"Access-Control-Allow-Origin",
+"*"
+);
+
+
+
+res.setHeader(
+"Cache-Control",
+"no-cache"
+);
+
+
+
+return res.send(rewritten);
+
+
+
+}
+
+
+
+
+
+
+
+// ===== MP4 / TS =====
+
 
 res.status(response.status);
 
@@ -346,10 +461,12 @@ res.setHeader(
 );
 
 
+
 res.setHeader(
 "Cache-Control",
 "no-cache"
 );
+
 
 
 res.setHeader(
@@ -363,7 +480,8 @@ res.setHeader(
 "content-type",
 "content-length",
 "content-range"
-].forEach(header=>{
+]
+.forEach(header=>{
 
 
 const value =
@@ -372,7 +490,10 @@ response.headers.get(header);
 
 if(value){
 
-res.setHeader(header,value);
+res.setHeader(
+header,
+value
+);
 
 }
 
@@ -383,12 +504,7 @@ res.setHeader(header,value);
 
 
 
-if(!response.body){
-
-return res.end();
-
-}
-
+if(response.body){
 
 
 Readable.fromWeb(
@@ -396,11 +512,19 @@ response.body
 ).pipe(res);
 
 
+}else{
+
+res.end();
+
+}
+
+
 
 }catch(error){
 
 
 console.log("[STREAM ERROR]",error);
+
 
 
 res.status(500).json({
@@ -420,7 +544,7 @@ detail:error.message
 
 
 
-// ================= ROTAS DE VIDEO =================
+// ================= ROUTES =================
 
 
 app.get("/play",streamProxy);
@@ -444,11 +568,9 @@ PORT,
 
 ()=>{
 
-
 console.log(
 `Servidor online porta ${PORT}`
 );
-
 
 }
 
