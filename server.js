@@ -14,15 +14,14 @@ const PORT = process.env.PORT || 8080;
 const REQUEST_TIMEOUT = 15000;
 
 
-
 // ================= HEADERS =================
 
-function createHeaders(dns){
+function createHeaders(){
 
     return {
 
         "User-Agent":
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
+        "Dalvik/2.1.0 (Linux; Android 11)",
 
         "Accept":
         "application/json,text/plain,*/*",
@@ -36,16 +35,15 @@ function createHeaders(dns){
         "Connection":
         "keep-alive",
 
-        "Referer":
-        dns,
+        "Accept-Encoding":
+        "gzip, deflate",
 
-        "Origin":
-        dns
+        "DNT":
+        "1"
 
     };
 
 }
-
 
 
 // ================= FETCH CONTROL =================
@@ -101,7 +99,7 @@ app.get("/",(req,res)=>{
 
         service:"IPTV Backend",
 
-        version:"v20",
+        version:"v21",
 
         time:new Date()
 
@@ -184,7 +182,7 @@ api,
 method:"GET",
 
 headers:
-createHeaders(dns),
+createHeaders(),
 
 redirect:"follow"
 
