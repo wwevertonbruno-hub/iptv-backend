@@ -12,12 +12,12 @@ app.use(express.json({ limit: "10mb" }));
 
 const PORT = process.env.PORT || 8080;
 
-const REQUEST_TIMEOUT = 15000;
+const REQUEST_TIMEOUT = 20000;
 
 
 // ================= HEADERS =================
 
-function createHeaders(){
+function createHeaders(dns = "") {
 
     return {
 
@@ -34,7 +34,12 @@ function createHeaders(){
         "no-cache",
 
         "Connection":
-        "keep-alive"
+        "keep-alive",
+
+        ...(dns ? {
+            "Referer": dns,
+            "Origin": dns
+        } : {})
 
     };
 
@@ -42,15 +47,15 @@ function createHeaders(){
 
 
 
-// ================= FETCH CONTROL =================
+// ================= FETCH TIMEOUT =================
 
-async function requestWithTimeout(url, options={}){
+async function requestWithTimeout(url, options = {}) {
 
 
     const controller = new AbortController();
 
 
-    const timer = setTimeout(()=>{
+    const timer = setTimeout(() => {
 
         controller.abort();
 
@@ -58,19 +63,15 @@ async function requestWithTimeout(url, options={}){
 
 
 
-    try{
+    try {
 
-
-        const response = await fetch(url,{
+        return await fetch(url, {
 
             ...options,
 
             signal: controller.signal
 
         });
-
-
-        return response;
 
 
     } finally {
@@ -83,10 +84,12 @@ async function requestWithTimeout(url, options={}){
 
 
 
+
 // ================= HEALTH =================
 
 
-app.get("/",(req,res)=>{
+app.get("/", (req,res)=>{
+
 
     res.json({
 
@@ -94,13 +97,15 @@ app.get("/",(req,res)=>{
 
         service:"IPTV Backend",
 
-        version:"v22",
+        version:"v23",
 
         time:new Date()
 
     });
 
+
 });
+
 
 
 
@@ -108,28 +113,35 @@ app.get("/",(req,res)=>{
 // ================= LOGIN =================
 
 
-app.post("/login",async(req,res)=>{
+app.post("/login", async(req,res)=>{
 
 
 try{
 
 
 const {
+
 dns,
+
 username,
+
 password,
+
 action="get_live_streams"
+
 }=req.body;
 
 
 
 if(!dns || !username || !password){
 
+
 return res.status(400).json({
 
 error:"Informe dns, username e password"
 
 });
+
 
 }
 
@@ -165,8 +177,7 @@ console.log("[LOGIN]", api.toString());
 
 
 
-const response =
-await requestWithTimeout(
+const response = await requestWithTimeout(
 
 api,
 
@@ -174,7 +185,7 @@ api,
 
 method:"GET",
 
-headers:createHeaders(),
+headers:createHeaders(dns),
 
 redirect:"follow"
 
@@ -184,29 +195,15 @@ redirect:"follow"
 
 
 
-const server =
-response.headers.get("server");
-
-
-const cloudflare =
-server &&
-server.toLowerCase()
-.includes("cloudflare");
+const body = await response.text();
 
 
 
-const body =
-await response.text();
+console.log("[LOGIN RESPONSE]", {
 
+status: response.status,
 
-
-console.log({
-
-status:response.status,
-
-server,
-
-cloudflare
+server: response.headers.get("server")
 
 });
 
@@ -221,15 +218,7 @@ error:"Servidor externo recusou",
 
 status_origem:response.status,
 
-servidor:server,
-
-cloudflare,
-
-cf_ray:
-response.headers.get("cf-ray"),
-
-resposta:
-body.substring(0,300)
+resposta:body.substring(0,300)
 
 });
 
@@ -241,12 +230,7 @@ body.substring(0,300)
 try{
 
 
-const json =
-JSON.parse(body);
-
-
-return res.json(json);
-
+return res.json(JSON.parse(body));
 
 
 }catch{
@@ -254,10 +238,9 @@ return res.json(json);
 
 return res.status(500).json({
 
-error:"Resposta inválida do servidor",
+error:"Resposta inválida",
 
-resposta:
-body.substring(0,300)
+resposta:body.substring(0,300)
 
 });
 
@@ -269,7 +252,10 @@ body.substring(0,300)
 }catch(error){
 
 
-return res.status(500).json({
+console.log("[LOGIN ERROR]",error);
+
+
+res.status(500).json({
 
 error:"Falha no backend",
 
@@ -281,15 +267,18 @@ detalhe:error.message
 }
 
 
+
 });
 
 
 
 
-// ================= PLAY PROXY =================
 
 
-app.get("/play", async (req,res)=>{
+// ================= STREAM HANDLER =================
+
+
+async function proxyStream(req,res){
 
 
 try{
@@ -301,36 +290,45 @@ const { url } = req.query;
 
 if(!url){
 
+
 return res.status(400).json({
 
 error:"URL do stream não informada"
 
 });
 
+
 }
 
 
 
-console.log("[PLAY]", url);
+console.log("[STREAM]", url);
 
 
 
 const headers = {
 
+
 "User-Agent":
+
 "Mozilla/5.0 (Linux; Android 11) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36",
 
+
 "Accept":
+
 "*/*",
 
+
 "Connection":
+
 "keep-alive"
+
 
 };
 
 
 
-// suporta pausa/carregamento do player
+// importante para players
 
 if(req.headers.range){
 
@@ -340,7 +338,9 @@ headers.Range = req.headers.range;
 
 
 
+
 const response = await fetch(url,{
+
 
 method:"GET",
 
@@ -348,18 +348,22 @@ headers,
 
 redirect:"follow"
 
+
 });
 
 
 
-console.log("[PLAY RESPONSE]",{
+
+console.log("[STREAM RESPONSE]",{
+
 
 status:response.status,
 
-type:
+contentType:
 response.headers.get("content-type")
 
 });
+
 
 
 
@@ -375,8 +379,7 @@ res.status(response.status);
 ].forEach(header=>{
 
 
-const value =
-response.headers.get(header);
+const value = response.headers.get(header);
 
 
 if(value){
@@ -390,6 +393,8 @@ res.setHeader(header,value);
 
 
 
+
+
 if(!response.body){
 
 return res.end();
@@ -398,8 +403,12 @@ return res.end();
 
 
 
-const stream =
-Readable.fromWeb(response.body);
+
+
+const stream = Readable.fromWeb(
+response.body
+);
+
 
 
 stream.pipe(res);
@@ -409,13 +418,13 @@ stream.pipe(res);
 }catch(error){
 
 
-console.log("[PLAY ERROR]",error);
+console.log("[STREAM ERROR]",error);
 
 
 
 res.status(500).json({
 
-error:"Falha no proxy de reprodução",
+error:"Erro no proxy",
 
 detalhe:error.message
 
@@ -425,7 +434,27 @@ detalhe:error.message
 }
 
 
-});
+}
+
+
+
+
+
+
+// ================= PLAY =================
+
+
+app.get("/play", proxyStream);
+
+
+
+
+// ================= STREAM PROXY (LOVABLE) =================
+
+
+app.get("/stream-proxy", proxyStream);
+
+
 
 
 
@@ -441,9 +470,11 @@ PORT,
 
 ()=>{
 
+
 console.log(
 `Servidor online porta ${PORT}`
 );
+
 
 }
 
