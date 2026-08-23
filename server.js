@@ -5,91 +5,137 @@ const { Readable } = require("stream");
 const app = express();
 
 app.use(cors());
-app.use(express.json({ limit: "10mb" }));
+app.use(express.json({limit:"10mb"}));
 
 const PORT = process.env.PORT || 8080;
 
 
-// ================= HEADERS =================
+// ================= HEADERS IPTV =================
 
-function createHeaders() {
-    return {
-        "User-Agent":
-        "Mozilla/5.0 (Linux; Android 11) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36",
+function headers(){
 
-        "Accept":
-        "*/*",
+return {
 
-        "Connection":
-        "keep-alive"
-    };
+"User-Agent":
+"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
+
+"Accept":
+"*/*"
+
+};
+
 }
 
 
+// ================= STATUS =================
 
-// ================= HOME =================
+app.get("/",(req,res)=>{
 
-app.get("/", (req,res)=>{
+res.json({
 
-    res.json({
-        status:"online",
-        service:"IPTV Backend",
-        version:"v26",
-        time:new Date()
-    });
+status:"online",
+service:"IPTV Backend",
+version:"v27",
+time:new Date()
+
+});
 
 });
 
 
 
 
-// ================= LOGIN =================
+// ================= XTREAM API PROXY =================
+
 
 app.post("/login", async(req,res)=>{
 
+
 try{
 
+
 const {
+
 dns,
 username,
 password,
-action="get_live_streams"
+action,
+
+...params
+
 }=req.body;
 
 
-const url =
-`${dns}/player_api.php?username=${username}&password=${password}&action=${action}`;
+
+let url =
+`${dns}/player_api.php?username=${username}&password=${password}`;
+
+
+
+if(action){
+
+url += `&action=${action}`;
+
+}
+
+
+// adiciona parâmetros extras
+Object.keys(params).forEach(key=>{
+
+if(params[key] !== undefined){
+
+url += `&${key}=${encodeURIComponent(params[key])}`;
+
+}
+
+});
+
 
 
 console.log("[LOGIN]",url);
 
 
+
 const response = await fetch(url,{
-headers:createHeaders()
+
+headers:headers()
+
 });
 
 
-const data = await response.text();
+
+const text = await response.text();
+
 
 
 console.log("[LOGIN RESPONSE]",{
+
 status:response.status
+
 });
 
 
-res.status(response.status).send(data);
+
+res.status(response.status).send(text);
 
 
-}catch(error){
 
-console.log(error);
+}catch(err){
+
+
+console.log(err);
+
 
 res.status(500).json({
-error:error.message
+
+error:err.message
+
 });
+
 
 }
 
+
 });
 
 
@@ -97,48 +143,45 @@ error:error.message
 
 
 
-// ================= REWRITE HLS =================
+// ================= STREAM =================
 
-function rewriteM3U8(content, baseUrl){
+
+function rewriteM3U8(content,base){
+
 
 return content
 .split("\n")
 .map(line=>{
 
 
-if(!line || line.startsWith("#"))
+if(line.startsWith("#") || !line.trim())
+
 return line;
 
-
-let url;
 
 
 try{
 
-url = new URL(line,baseUrl).href;
+return `/stream-proxy?url=${encodeURIComponent(new URL(line,base).href)}`;
 
 }catch{
 
-url=line;
+return line;
 
 }
-
-
-return `/stream-proxy?url=${encodeURIComponent(url)}`;
 
 
 })
 .join("\n");
 
+
 }
 
 
 
 
+async function stream(req,res){
 
-// ================= STREAM PROXY =================
-
-async function streamProxy(req,res){
 
 try{
 
@@ -146,34 +189,34 @@ try{
 const {url}=req.query;
 
 
-if(!url){
+if(!url)
+return res.status(400).send("URL ausente");
 
-return res.status(400).json({
-error:"URL ausente"
-});
-
-}
 
 
 console.log("[STREAM]",url);
 
-console.log("[RANGE]",req.headers.range || "none");
 
-
-
-const headers=createHeaders();
+let h=headers();
 
 
 if(req.headers.range){
 
-headers.Range=req.headers.range;
+h.Range=req.headers.range;
+
+console.log("[RANGE]",req.headers.range);
+
+}else{
+
+console.log("[RANGE] none");
 
 }
 
 
 
-const response = await fetch(url,{
-headers,
+const response =
+await fetch(url,{
+headers:h,
 redirect:"follow"
 });
 
@@ -185,10 +228,11 @@ response.headers.get("content-type") || "";
 
 
 console.log("[STREAM RESPONSE]",{
+
 status:response.status,
 type
-});
 
+});
 
 
 
@@ -201,13 +245,8 @@ type.includes("mpegurl")
 ){
 
 
-const text =
+const body =
 await response.text();
-
-
-const fixed =
-rewriteM3U8(text,url);
-
 
 
 res.setHeader(
@@ -222,14 +261,18 @@ res.setHeader(
 );
 
 
-return res.send(fixed);
+
+return res.send(
+rewriteM3U8(body,url)
+);
+
 
 }
 
 
 
 
-// VIDEO MP4 / TS
+// VIDEO
 
 
 res.status(response.status);
@@ -241,75 +284,58 @@ res.setHeader(
 );
 
 
+if(type)
 res.setHeader(
-"Accept-Ranges",
-"bytes"
+"Content-Type",
+type
 );
 
 
-[
-"content-type",
-"content-length",
-"content-range"
-].forEach(h=>{
 
-const value=response.headers.get(h);
-
-if(value)
-res.setHeader(h,value);
-
-});
-
-
-
-if(response.body){
+if(response.body)
 
 Readable.fromWeb(response.body)
 .pipe(res);
 
-}else{
+else
 
 res.end();
 
-}
 
 
+}catch(err){
 
-}catch(error){
 
-
-console.log("[STREAM ERROR]",error);
+console.log("[STREAM ERROR]",err);
 
 
 res.status(500).json({
 
-error:"stream error",
-
-detail:error.message
+error:err.message
 
 });
 
 
 }
 
+
 }
 
 
 
+app.get("/play",stream);
 
-app.get("/play",streamProxy);
-
-app.get("/stream-proxy",streamProxy);
-
+app.get("/stream-proxy",stream);
 
 
 
 
 
 
-// ================= IMAGE PROXY =================
+// ================= IMAGENS =================
 
-app.get("/image", async(req,res)=>{
+
+app.get("/image",async(req,res)=>{
 
 
 try{
@@ -318,11 +344,8 @@ try{
 const {url}=req.query;
 
 
-if(!url){
-
-return res.status(400).send("Imagem não informada");
-
-}
+if(!url)
+return res.status(400).send("Imagem ausente");
 
 
 
@@ -332,21 +355,18 @@ console.log("[IMAGE]",url);
 
 const response =
 await fetch(url,{
+
 headers:{
-"User-Agent":
-"Mozilla/5.0",
-"Accept":
-"image/*,*/*"
+"User-Agent":"Mozilla/5.0"
 }
+
 });
 
 
 
-if(!response.ok){
+if(!response.ok)
 
 return res.status(response.status).end();
-
-}
 
 
 
@@ -375,14 +395,16 @@ await response.arrayBuffer();
 
 
 
-res.send(Buffer.from(buffer));
+res.send(
+Buffer.from(buffer)
+);
 
 
 
-}catch(error){
+}catch(err){
 
 
-console.log("[IMAGE ERROR]",error);
+console.log("[IMAGE ERROR]",err);
 
 
 res.status(500).end();
@@ -391,8 +413,8 @@ res.status(500).end();
 }
 
 
-});
 
+});
 
 
 
@@ -401,13 +423,18 @@ res.status(500).end();
 
 // ================= START =================
 
+
 app.listen(
+
 PORT,
 "0.0.0.0",
+
 ()=>{
 
 console.log(
 `Servidor online porta ${PORT}`
 );
 
-});
+}
+
+);
