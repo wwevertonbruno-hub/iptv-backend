@@ -5,14 +5,33 @@ const { Readable } = require("stream");
 const app = express();
 
 app.use(cors());
-app.use(express.json({limit:"10mb"}));
+app.use(express.json({ limit: "10mb" }));
 
 const PORT = process.env.PORT || 8080;
 
 
-// ================= HEADERS IPTV =================
+// =========================
+// STATUS
+// =========================
 
-function headers(){
+app.get("/", (req,res)=>{
+
+res.json({
+    status:"online",
+    service:"IPTV Backend",
+    version:"v28",
+    time:new Date()
+});
+
+});
+
+
+
+// =========================
+// HEADERS IPTV
+// =========================
+
+function iptvHeaders(){
 
 return {
 
@@ -20,33 +39,20 @@ return {
 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
 
 "Accept":
-"*/*"
+"*/*",
+
+"Connection":
+"keep-alive"
 
 };
 
 }
 
 
-// ================= STATUS =================
 
-app.get("/",(req,res)=>{
-
-res.json({
-
-status:"online",
-service:"IPTV Backend",
-version:"v27",
-time:new Date()
-
-});
-
-});
-
-
-
-
-// ================= XTREAM API PROXY =================
-
+// =========================
+// LOGIN / XTREAM API
+// =========================
 
 app.post("/login", async(req,res)=>{
 
@@ -55,12 +61,10 @@ try{
 
 
 const {
-
 dns,
 username,
 password,
 action,
-
 ...params
 
 }=req.body;
@@ -79,12 +83,19 @@ url += `&action=${action}`;
 }
 
 
-// adiciona parâmetros extras
+
+// adiciona:
+ // vod_id
+ // series_id
+ // category_id
+
 Object.keys(params).forEach(key=>{
+
 
 if(params[key] !== undefined){
 
-url += `&${key}=${encodeURIComponent(params[key])}`;
+url +=
+`&${key}=${encodeURIComponent(params[key])}`;
 
 }
 
@@ -96,39 +107,37 @@ console.log("[LOGIN]",url);
 
 
 
-const response = await fetch(url,{
-
-headers:headers()
-
+const response =
+await fetch(url,{
+headers:iptvHeaders()
 });
 
 
 
-const text = await response.text();
+const data =
+await response.text();
 
 
 
 console.log("[LOGIN RESPONSE]",{
-
 status:response.status
-
 });
 
 
 
-res.status(response.status).send(text);
+res.status(response.status).send(data);
 
 
 
-}catch(err){
+}catch(error){
 
 
-console.log(err);
+console.log("[LOGIN ERROR]",error);
 
 
 res.status(500).json({
 
-error:err.message
+error:error.message
 
 });
 
@@ -142,8 +151,10 @@ error:err.message
 
 
 
-
-// ================= STREAM =================
+// =========================
+// STREAM PROXY
+// MP4 + M3U8
+// =========================
 
 
 function rewriteM3U8(content,base){
@@ -154,19 +165,30 @@ return content
 .map(line=>{
 
 
-if(line.startsWith("#") || !line.trim())
+if(
+line.startsWith("#") ||
+line.trim()===""
+){
 
 return line;
+
+}
 
 
 
 try{
 
-return `/stream-proxy?url=${encodeURIComponent(new URL(line,base).href)}`;
+
+return `/stream-proxy?url=${encodeURIComponent(
+new URL(line,base).href
+)}`;
+
 
 }catch{
 
+
 return line;
+
 
 }
 
@@ -179,74 +201,101 @@ return line;
 
 
 
-
-async function stream(req,res){
+async function streamProxy(req,res){
 
 
 try{
 
 
-const {url}=req.query;
+const {
+url
+}=req.query;
 
 
-if(!url)
-return res.status(400).send("URL ausente");
+
+if(!url){
+
+return res.status(400)
+.send("URL ausente");
+
+}
 
 
 
 console.log("[STREAM]",url);
 
 
-let h=headers();
+
+const headers = iptvHeaders();
+
 
 
 if(req.headers.range){
 
-h.Range=req.headers.range;
+headers.Range =
+req.headers.range;
 
-console.log("[RANGE]",req.headers.range);
+
+console.log(
+"[RANGE]",
+req.headers.range
+);
+
 
 }else{
 
+
 console.log("[RANGE] none");
+
 
 }
 
 
 
+
 const response =
 await fetch(url,{
-headers:h,
+
+headers,
+
 redirect:"follow"
+
 });
 
 
 
-const type =
-response.headers.get("content-type") || "";
+const contentType =
+response.headers.get(
+"content-type"
+) || "";
 
 
 
-console.log("[STREAM RESPONSE]",{
-
+console.log(
+"[STREAM RESPONSE]",
+{
 status:response.status,
-type
-
-});
-
-
+type:contentType
+}
+);
 
 
+
+
+// =====================
 // HLS
+// =====================
 
 if(
 url.includes(".m3u8") ||
-type.includes("mpegurl")
+contentType.includes("mpegurl")
 ){
 
 
-const body =
+
+const text =
 await response.text();
+
 
 
 res.setHeader(
@@ -263,8 +312,9 @@ res.setHeader(
 
 
 return res.send(
-rewriteM3U8(body,url)
+rewriteM3U8(text,url)
 );
+
 
 
 }
@@ -272,10 +322,44 @@ rewriteM3U8(body,url)
 
 
 
-// VIDEO
+// =====================
+// MP4
+// =====================
 
 
-res.status(response.status);
+const headersCopy=[
+
+"content-type",
+"content-length",
+"content-range",
+"accept-ranges",
+"last-modified",
+"etag"
+
+];
+
+
+
+headersCopy.forEach(header=>{
+
+
+const value =
+response.headers.get(header);
+
+
+
+if(value){
+
+res.setHeader(
+header,
+value
+);
+
+}
+
+
+});
+
 
 
 res.setHeader(
@@ -284,34 +368,44 @@ res.setHeader(
 );
 
 
-if(type)
-res.setHeader(
-"Content-Type",
-type
+
+res.status(
+response.status
 );
 
 
 
-if(response.body)
+if(response.body){
 
-Readable.fromWeb(response.body)
+
+Readable
+.fromWeb(response.body)
 .pipe(res);
 
-else
+
+}else{
+
 
 res.end();
 
 
+}
 
-}catch(err){
 
 
-console.log("[STREAM ERROR]",err);
+}catch(error){
+
+
+console.log(
+"[STREAM ERROR]",
+error
+);
+
 
 
 res.status(500).json({
 
-error:err.message
+error:error.message
 
 });
 
@@ -323,16 +417,26 @@ error:err.message
 
 
 
-app.get("/play",stream);
 
-app.get("/stream-proxy",stream);
-
-
-
-
+app.get(
+"/stream-proxy",
+streamProxy
+);
 
 
-// ================= IMAGENS =================
+app.get(
+"/play",
+streamProxy
+);
+
+
+
+
+
+
+// =========================
+// IMAGENS
+// =========================
 
 
 app.get("/image",async(req,res)=>{
@@ -341,15 +445,21 @@ app.get("/image",async(req,res)=>{
 try{
 
 
-const {url}=req.query;
+const {
+url
+}=req.query;
+
 
 
 if(!url)
-return res.status(400).send("Imagem ausente");
+return res.status(400).end();
 
 
 
-console.log("[IMAGE]",url);
+console.log(
+"[IMAGE]",
+url
+);
 
 
 
@@ -357,41 +467,33 @@ const response =
 await fetch(url,{
 
 headers:{
-"User-Agent":"Mozilla/5.0"
+"User-Agent":
+"Mozilla/5.0"
 }
 
 });
 
 
 
-if(!response.ok)
-
-return res.status(response.status).end();
-
-
-
-const type =
-response.headers.get("content-type")
-||
-"image/png";
+const buffer =
+await response.arrayBuffer();
 
 
 
 res.setHeader(
 "Content-Type",
-type
+response.headers.get(
+"content-type"
+) ||
+"image/png"
 );
+
 
 
 res.setHeader(
 "Access-Control-Allow-Origin",
 "*"
 );
-
-
-
-const buffer =
-await response.arrayBuffer();
 
 
 
@@ -401,10 +503,13 @@ Buffer.from(buffer)
 
 
 
-}catch(err){
+}catch(error){
 
 
-console.log("[IMAGE ERROR]",err);
+console.log(
+"[IMAGE ERROR]",
+error
+);
 
 
 res.status(500).end();
@@ -421,20 +526,21 @@ res.status(500).end();
 
 
 
-// ================= START =================
+// =========================
+// START
+// =========================
 
 
 app.listen(
-
 PORT,
 "0.0.0.0",
-
 ()=>{
+
 
 console.log(
 `Servidor online porta ${PORT}`
 );
 
-}
 
+}
 );
